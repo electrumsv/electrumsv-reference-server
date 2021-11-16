@@ -2,13 +2,14 @@
 ElectrumSV's wallet_database/sqlite_support.py and helps to avoid the overhead associated with
 creating a new db connection"""
 
+from __future__ import annotations
 import logging
 import os
 import queue
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Set, List, Optional
+from typing import Set, List, Optional, Tuple
 
 from bitcoinx import hash_to_hex_str, hex_str_to_hash
 
@@ -144,11 +145,51 @@ class SQLiteDatabase:
             self.release_connection(connection)
 
     def create_tables(self):
-        pass
+        self.create_account_table()
 
     def drop_tables(self):
-        pass
+        self.drop_account_table()
 
     def reset_tables(self):
         self.drop_tables()
         self.create_tables()
+
+    def create_account_table(self) -> None:
+        sql = (
+            """
+            CREATE TABLE IF NOT EXISTS accounts (
+                account_id          INTEGER,
+                public_key_bytes    BINARY(32),
+                api_key             TEXT
+            )"""
+        )
+        self.execute(sql)
+
+    def drop_account_table(self) -> None:
+        sql = (
+            """DROP TABLE IF EXISTS accounts"""
+        )
+        self.execute(sql)
+
+    def get_account_id_for_api_key(self, api_key: str) -> Optional[int]:
+        sql = "SELECT account_id FROM accounts WHERE api_key = ?"
+        result = self.execute(sql, params=(api_key,))
+        if len(result) == 0:
+            return None
+        account_id: int = result[0][0]
+        return account_id
+
+    def get_account_id_for_public_key_bytes(self, public_key_bytes: bytes) -> Optional[int]:
+        sql = "SELECT account_id FROM accounts WHERE public_key_bytes = ?"
+        result = self.execute(sql, params=(public_key_bytes,))
+        if len(result) == 0:
+            return None
+        account_id: int = result[0][0]
+        return account_id
+
+    def get_account_metadata_for_account_id(self, account_id: int) -> Tuple[bytes, str]:
+        sql = "SELECT public_key_bytes, api_key FROM accounts WHERE account_id = ?"
+        result = self.execute(sql, params=(account_id,))
+        if len(result) == 0:
+            return b'', ''
+        return result[0]

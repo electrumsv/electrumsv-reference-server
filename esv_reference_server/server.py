@@ -8,13 +8,11 @@ import queue
 import threading
 from typing import Dict
 
+from .constants import SERVER_HOST, SERVER_PORT
 from .handlers_ws import HeadersWebSocket, WSClient
 from . import handlers
 from .sqlite_db import SQLiteDatabase
 
-
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 47124
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
@@ -84,6 +82,8 @@ def get_aiohttp_app() -> web.Application:
     app.add_routes([
         web.get("/", handlers.ping),
         web.get("/error", handlers.error),
+        web.get("/api/v1/endpoints", handlers.get_endpoints_data),
+        web.get("/api/v1/account", handlers.get_account),
         web.get("/api/v1/headers", handlers.get_headers),
         web.view("/api/v1/headers/websocket", HeadersWebSocket),
     ])
