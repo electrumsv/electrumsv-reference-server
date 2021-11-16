@@ -8,8 +8,6 @@ import queue
 import threading
 from typing import Dict
 
-from electrumsv_sdk.utils import get_directory_name
-
 from .handlers_ws import HeadersWebSocket, WSClient
 from . import handlers
 from .sqlite_db import SQLiteDatabase
@@ -18,7 +16,6 @@ from .sqlite_db import SQLiteDatabase
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 47124
 
-COMPONENT_NAME = get_directory_name(__file__)
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 # Silence verbose logging

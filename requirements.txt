@@ -1,3 +1,2 @@
 bitcoinx
 requests>=2.21.0
-electrumsv_sdk
