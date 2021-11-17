@@ -1,6 +1,9 @@
+import time
 from pathlib import Path
 
 import aiohttp
+import bitcoinx
+import requests
 from aiohttp import web
 import asyncio
 import os
@@ -22,6 +25,8 @@ logger = logging.getLogger("server")
 
 aiohttp_logger = logging.getLogger("aiohttp")
 aiohttp_logger.setLevel(logging.WARNING)
+requests_logger = logging.getLogger("urllib3")
+requests_logger.setLevel(logging.WARNING)
 
 
 class ApplicationState(object):
@@ -55,18 +60,49 @@ class ApplicationState(object):
     def header_notifications_thread(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
+            HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
+            HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+            current_best_hash = ""
+
             while self.app.is_alive:
                 try:
-                    json_msg = self.ws_queue.get(timeout=0.5)
-                except queue.Empty:
+                    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+                    request_headers = {'Accept': 'application/json'}
+                    result = requests.get(url_to_fetch, request_headers)
+                    result.raise_for_status()
+                    longest_chain_tip = None
+                    for tip in result.json():
+                        if tip['state'] == "LONGEST_CHAIN":
+                            longest_chain_tip = tip
+
+                    if current_best_hash != longest_chain_tip['header']['hash']:
+                        self.logger.debug(f"Got new chain tip: {longest_chain_tip}")
+                        current_best_hash = longest_chain_tip['header']['hash']
+                        current_best_height = longest_chain_tip['height']
+                    else:
+                        time.sleep(2)
+                        continue
+                except Exception as e:
+                    logger.exception(e)
                     continue
-                self.logger.debug(f"Got from ws_queue: {json_msg}")
+
                 if not len(self.get_ws_clients()):
                     continue
 
+                # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client in self.get_ws_clients().items():
-                    # self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_str(json_msg),
+                    self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
+                    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{current_best_hash}"
+
+                    # Todo: this should actually be 'Accept' but HeaderSV uses 'Content-Type'
+                    request_headers = {'Content-Type': 'application/octet-stream'}
+                    result = requests.get(url_to_fetch, headers=request_headers)
+                    result.raise_for_status()
+
+                    response = bytearray()
+                    response += result.content  # 80 byte header
+                    response += bitcoinx.pack_be_uint32(current_best_height)
+                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_bytes(response),
                         self.loop)
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")

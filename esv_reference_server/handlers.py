@@ -64,6 +64,7 @@ async def get_chain_tips(request: web.Request) -> web.Response:
     async with client_session.get(url_to_fetch, headers=request_headers) as response:
         result = await response.json()
     response_headers = {'User-Agent': 'ESV-Ref-Server'}
+    # Todo - if we do not like json, we need to come up with a binary protocol for this
     return web.json_response(result, status=200, reason='OK', headers=response_headers)
 
 

@@ -4,13 +4,13 @@ import sys
 
 import traceback
 import aiohttp
+import bitcoinx
 from aiohttp import ClientConnectorError
 
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 47124
 BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
-WS_URL = "http://localhost:47124/ws"
-GET_STATUS_URL = BASE_URL + '/api/get_status'
+WS_URL = "http://localhost:47124/api/v1/headers/websocket"
 
 
 class MockApplicationState:
@@ -31,7 +31,9 @@ class WebsocketClient:
                 print(f'Connected to {WS_URL}')
 
                 async for msg in ws:
-                    print('Message received from server:', msg)
+                    new_tip_hash = bitcoinx.hash_to_hex_str(bitcoinx.double_sha256(msg.data[0:80]))
+                    new_tip_height = bitcoinx.unpack_be_uint32(msg.data[80:84])[0]
+                    print('Message new chain tip hash: ', new_tip_hash, 'height: ', new_tip_height)
                     if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
 
