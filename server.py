@@ -7,6 +7,7 @@ import typing
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
+import dotenv
 from aiohttp import web
 
 if typing.TYPE_CHECKING:
@@ -80,6 +81,7 @@ class AiohttpServer:
 
 async def main():
     setup_logging()
+    dotenv.load_dotenv(dotenv_path=MODULE_DIR.joinpath('.env'))
     app = get_aiohttp_app()
     server = AiohttpServer(app)
     try:

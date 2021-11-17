@@ -1,12 +1,13 @@
 from pathlib import Path
 
+import aiohttp
 from aiohttp import web
 import asyncio
 import os
 import logging
 import queue
 import threading
-from typing import Dict
+from typing import Dict, NoReturn
 
 from .constants import SERVER_HOST, SERVER_PORT
 from .handlers_ws import HeadersWebSocket, WSClient
@@ -17,6 +18,8 @@ from .sqlite_db import SQLiteDatabase
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 # Silence verbose logging
+logger = logging.getLogger("server")
+
 aiohttp_logger = logging.getLogger("aiohttp")
 aiohttp_logger.setLevel(logging.WARNING)
 
@@ -71,22 +74,56 @@ class ApplicationState(object):
             self.logger.info("Closing push notifications thread")
 
 
+async def client_session_ctx(app: web.Application) -> NoReturn:
+    """
+    Cleanup context async generator to create and properly close aiohttp ClientSession
+
+    Ref.:
+
+        > https://docs.aiohttp.org/en/stable/web_advanced.html#cleanup-context
+        > https://docs.aiohttp.org/en/stable/web_advanced.html#aiohttp-web-signals
+        > https://docs.aiohttp.org/en/stable/web_advanced.html#data-sharing-aka-no-singletons-please
+    """
+    logger.debug('Creating ClientSession')
+    app['client_session'] = aiohttp.ClientSession()
+
+    yield
+
+    logger.debug('Closing ClientSession')
+    await app['client_session'].close()
+
+
 def get_aiohttp_app() -> web.Application:
     loop = asyncio.get_event_loop()
     app = web.Application()
+    app.cleanup_ctx.append(client_session_ctx)
     app_state = ApplicationState(app, loop)
 
     # This is the standard aiohttp way of managing state within the handlers
     app['app_state'] = app_state
     app['ws_clients'] = app_state.ws_clients
+
+    # Non-optional APIs
     app.add_routes([
         web.get("/", handlers.ping),
         web.get("/error", handlers.error),
         web.get("/api/v1/endpoints", handlers.get_endpoints_data),
-        web.get("/api/v1/account", handlers.get_account),
-        web.get("/api/v1/headers", handlers.get_headers),
-        web.view("/api/v1/headers/websocket", HeadersWebSocket),
+        web.get("/api/v1/account", handlers.get_account)
     ])
+
+    if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
+        app.add_routes([
+            web.get("/api/v1/headers", handlers.get_headers_by_height),
+            web.get("/api/v1/chain/tips", handlers.get_chain_tips),
+            web.view("/api/v1/headers/websocket", HeadersWebSocket),
+        ])
+
+    if os.getenv("EXPOSE_PEER_CHANNEL_APIS") == "1":
+        pass  # TBD
+
+    if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
+        pass  # TBD
+
     return app
 
 
