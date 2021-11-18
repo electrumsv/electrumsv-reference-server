@@ -38,20 +38,24 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
     height = params.get('height')
     count = params.get('count', '1')
 
-    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/byHeight?height={height}&count={count}"
-    if accept_type == 'application/octet-stream':
-        request_headers = {'Accept': 'application/octet-stream'}
-        async with client_session.get(url_to_fetch, headers=request_headers) as response:
-            result = await response.read()
-        response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
-        return web.Response(body=result, status=200, reason='OK', headers=response_headers)
+    try:
+        url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/byHeight?height={height}&count={count}"
+        if accept_type == 'application/octet-stream':
+            request_headers = {'Accept': 'application/octet-stream'}
+            async with client_session.get(url_to_fetch, headers=request_headers) as response:
+                result = await response.read()
+            response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
+            return web.Response(body=result, status=200, reason='OK', headers=response_headers)
 
-    # else: application/json
-    request_headers = {'Accept': 'application/json'}
-    async with client_session.get(url_to_fetch, headers=request_headers) as response:
-        result = await response.json()
-    response_headers = {'User-Agent': 'ESV-Ref-Server'}
-    return web.json_response(result, status=200, reason='OK', headers=response_headers)
+        # else: application/json
+        request_headers = {'Accept': 'application/json'}
+        async with client_session.get(url_to_fetch, headers=request_headers) as response:
+            result = await response.json()
+        response_headers = {'User-Agent': 'ESV-Ref-Server'}
+        return web.json_response(result, status=200, reason='OK', headers=response_headers)
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+        return web.HTTPServiceUnavailable()
 
 
 async def get_chain_tips(request: web.Request) -> web.Response:

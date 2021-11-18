@@ -82,6 +82,9 @@ class ApplicationState(object):
                     else:
                         time.sleep(2)
                         continue
+                except requests.exceptions.ConnectionError as e:
+                    logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+                    continue
                 except Exception as e:
                     logger.exception(e)
                     continue
