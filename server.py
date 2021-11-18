@@ -78,8 +78,22 @@ class AiohttpServer:
         await self.runner.cleanup()
 
 
+def load_dotenv(dotenv_path):
+    with open(dotenv_path, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            if line.startswith("#") or line.strip() == '':
+                continue
+
+            key = line.strip().split("=")[0]
+            val = line.strip().split("=")[1]
+            os.environ[key] = val
+
+
 async def main():
     setup_logging()
+    dotenv_path = MODULE_DIR.joinpath('.env')
+    load_dotenv(dotenv_path)
     app = get_aiohttp_app()
     server = AiohttpServer(app)
     try:

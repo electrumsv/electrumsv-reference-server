@@ -1,8 +1,11 @@
 from __future__ import annotations
+
+import os
 from datetime import datetime, timedelta
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+import aiohttp
 from aiohttp import web
 
 from .account import VerifiableKeyData, verify_key_data
@@ -25,8 +28,48 @@ async def error(request: web.Request) -> web.Response:
     raise ValueError("This is a test of raising an exception in the handler")
 
 
-async def get_headers(request: web.Request) -> web.Response:
-    raise NotImplementedError
+async def get_headers_by_height(request: web.Request) -> web.Response:
+    client_session: aiohttp.ClientSession = request.app['client_session']
+    HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
+    HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+
+    accept_type = request.headers.get('Accept')
+    params = request.rel_url.query
+    height = params.get('height')
+    count = params.get('count', '1')
+
+    try:
+        url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/byHeight?height={height}&count={count}"
+        if accept_type == 'application/octet-stream':
+            request_headers = {'Accept': 'application/octet-stream'}
+            async with client_session.get(url_to_fetch, headers=request_headers) as response:
+                result = await response.read()
+            response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
+            return web.Response(body=result, status=200, reason='OK', headers=response_headers)
+
+        # else: application/json
+        request_headers = {'Accept': 'application/json'}
+        async with client_session.get(url_to_fetch, headers=request_headers) as response:
+            result = await response.json()
+        response_headers = {'User-Agent': 'ESV-Ref-Server'}
+        return web.json_response(result, status=200, reason='OK', headers=response_headers)
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+        return web.HTTPServiceUnavailable()
+
+
+async def get_chain_tips(request: web.Request) -> web.Response:
+    client_session: aiohttp.ClientSession = request.app['client_session']
+    HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
+    HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+
+    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+    request_headers = {'Accept': 'application/json'}
+    async with client_session.get(url_to_fetch, headers=request_headers) as response:
+        result = await response.json()
+    response_headers = {'User-Agent': 'ESV-Ref-Server'}
+    # Todo - if we do not like json, we need to come up with a binary protocol for this
+    return web.json_response(result, status=200, reason='OK', headers=response_headers)
 
 
 async def get_account(request: web.Request) -> web.Response:
