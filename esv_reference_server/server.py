@@ -84,6 +84,8 @@ class ApplicationState(object):
                         continue
                 except requests.exceptions.ConnectionError as e:
                     logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+                    # Any new websocket connections will be notified when HeaderSV is back online
+                    current_best_hash = ""
                     continue
                 except Exception as e:
                     logger.exception(e)
