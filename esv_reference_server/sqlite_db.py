@@ -146,9 +146,11 @@ class SQLiteDatabase:
 
     def create_tables(self):
         self.create_account_table()
+        self.create_peer_channel_accounts_table()
 
     def drop_tables(self):
         self.drop_account_table()
+        self.drop_peer_channel_accounts_table()
 
     def reset_tables(self):
         self.drop_tables()
@@ -168,6 +170,25 @@ class SQLiteDatabase:
     def drop_account_table(self) -> None:
         sql = (
             """DROP TABLE IF EXISTS accounts"""
+        )
+        self.execute(sql)
+
+    def create_peer_channel_accounts_table(self) -> None:
+        sql = (
+            """
+            CREATE TABLE IF NOT EXISTS peer_channel_accounts (
+                peer_channel_account_id  INTEGER,
+                peer_channel_username    VARCHAR(256),
+                peer_channel_password    VARCHAR(1024),
+                account_id  INTEGER,
+                FOREIGN KEY(account_id) REFERENCES accounts(account_id)
+            )"""
+        )
+        self.execute(sql)
+
+    def drop_peer_channel_accounts_table(self) -> None:
+        sql = (
+            """DROP TABLE IF EXISTS peer_channel_accounts"""
         )
         self.execute(sql)
 

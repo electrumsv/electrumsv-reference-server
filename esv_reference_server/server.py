@@ -1,3 +1,4 @@
+import base64
 import time
 from pathlib import Path
 
@@ -42,6 +43,20 @@ class ApplicationState(object):
 
         self.sqlite_db = SQLiteDatabase(MODULE_DIR.parent / 'esv_reference_server.db')
 
+        self.header_sv_url = os.getenv('HEADER_SV_URL')
+        self.peer_channels_url = os.getenv('PEER_CHANNELS_URL')
+        self.peer_channel_account_id = os.getenv('PEER_CHANNELS_MASTER_ACCOUND_ID')
+
+        # Fix padding
+        master_peer_channel_token = os.getenv('PEER_CHANNELS_MASTER_ACCOUNT_CREATION_TOKEN')
+        fixed_padding = base64.urlsafe_b64decode(master_peer_channel_token + '===')
+        self.peer_channel_master_account_creation_token = base64.urlsafe_b64encode(fixed_padding).decode('utf-8')
+
+        self.peer_channel_basic_auth = aiohttp.BasicAuth(
+            login=os.getenv('PEER_CHANNELS_MASTER_USER'),
+            password=os.getenv('PEER_CHANNELS_MASTER_PASSWORD')
+        )
+
     def start_threads(self):
         threading.Thread(target=self.header_notifications_thread, daemon=True).start()
 
@@ -60,13 +75,11 @@ class ApplicationState(object):
     def header_notifications_thread(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
-            HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-            HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
             current_best_hash = ""
 
             while self.app.is_alive:
                 try:
-                    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+                    url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
                     result = requests.get(url_to_fetch, request_headers)
                     result.raise_for_status()
@@ -83,7 +96,7 @@ class ApplicationState(object):
                         time.sleep(2)
                         continue
                 except requests.exceptions.ConnectionError as e:
-                    logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+                    logger.error(f"HeaderSV service is unavailable on {self.header_sv_url}")
                     # Any new websocket connections will be notified when HeaderSV is back online
                     current_best_hash = ""
                     continue
@@ -97,7 +110,7 @@ class ApplicationState(object):
                 # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client in self.get_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{current_best_hash}"
+                    url_to_fetch = f"{HEADER_SV_URL}/api/v1/chain/header/{current_best_hash}"
 
                     # Todo: this should actually be 'Accept' but HeaderSV uses 'Content-Type'
                     request_headers = {'Content-Type': 'application/octet-stream'}
@@ -149,7 +162,8 @@ def get_aiohttp_app() -> web.Application:
         web.get("/", handlers.ping),
         web.get("/error", handlers.error),
         web.get("/api/v1/endpoints", handlers.get_endpoints_data),
-        web.get("/api/v1/account", handlers.get_account)
+        web.get("/api/v1/account", handlers.get_account),
+        web.post("/api/v1/account/dummy_create_account", handlers.dummy_create_account)
     ])
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 from datetime import datetime, timedelta
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -30,8 +32,7 @@ async def error(request: web.Request) -> web.Response:
 
 async def get_header(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
-    HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-    HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+    app_state: ApplicationState = request.app['app_state']
 
     accept_type = request.headers.get('Accept')
     blockhash = request.match_info.get('hash')
@@ -39,7 +40,7 @@ async def get_header(request: web.Request) -> web.Response:
         return web.HTTPNotFound()
 
     try:
-        url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{blockhash}"
+        url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{blockhash}"
         if accept_type == 'application/octet-stream':
             request_headers = {'Content-Type': 'application/octet-stream'}  # Should be 'Accept'
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
@@ -54,14 +55,13 @@ async def get_header(request: web.Request) -> web.Response:
         response_headers = {'User-Agent': 'ESV-Ref-Server'}
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
     except aiohttp.ClientConnectorError as e:
-        logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+        logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
         return web.HTTPServiceUnavailable()
 
 
 async def get_headers_by_height(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
-    HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-    HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+    app_state: ApplicationState = request.app['app_state']
 
     accept_type = request.headers.get('Accept')
     params = request.rel_url.query
@@ -69,7 +69,7 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
     count = params.get('count', '1')
 
     try:
-        url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/byHeight?height={height}&count={count}"
+        url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/byHeight?height={height}&count={count}"
         if accept_type == 'application/octet-stream':
             request_headers = {'Accept': 'application/octet-stream'}
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
@@ -84,16 +84,15 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
         response_headers = {'User-Agent': 'ESV-Ref-Server'}
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
     except aiohttp.ClientConnectorError as e:
-        logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+        logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
         return web.HTTPServiceUnavailable()
 
 
 async def get_chain_tips(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
-    HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-    HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+    app_state: ApplicationState = request.app['app_state']
 
-    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+    url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/tips"
     request_headers = {'Accept': 'application/json'}
     async with client_session.get(url_to_fetch, headers=request_headers) as response:
         result = await response.json()
@@ -102,7 +101,51 @@ async def get_chain_tips(request: web.Request) -> web.Response:
     return web.json_response(result, status=200, reason='OK', headers=response_headers)
 
 
+# Todo - replace this with the real 'create_account' handler when Roger had finished it
+#  add the _create_peer_channel_account() functionality to Roger's implementation
+async def dummy_create_account(request: web.Request) -> web.Response:
+    """This is a mock of the handler that will create the account on successfully opening a payment
+    channel"""
+    app_state: ApplicationState = request.app['app_state']
+    client_session: aiohttp.ClientSession = request.app['client_session']
+    sqlite_db: SQLiteDatabase = app_state.sqlite_db
+
+    # Todo - replace this part with Roger's actual implementation when ready
+    # ASSUME THAT PAYMENT CHANNEL CREATION WAS SUCCESSFUL AND A NEW ACCOUNT IS NOW CREATED WITH:
+    dummy_account_id = 12345
+    dummy_pubkey_hex = '0000000000000000000000000000000000000000000000000000000000000000'
+    dummy_api_key = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'
+    sql = (f"""
+        INSERT INTO accounts VALUES({dummy_account_id}, X'{dummy_pubkey_hex}', X'{dummy_api_key}'
+        )""")
+    sqlite_db.execute(sql)
+
+    # Todo - extend Roger's implementation with this (Peer Channel account creation):
+    request_headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer: {app_state.peer_channel_master_account_creation_token}'}
+    url_to_fetch = f"http://127.0.0.1:5000/api/v1/account"
+
+    request_body = {
+        'account_name': dummy_pubkey_hex,
+        'username': dummy_pubkey_hex,
+        'password': dummy_api_key,
+    }
+
+    async with client_session.post(url_to_fetch, json=request_body,
+            headers=request_headers) as response:
+        response.raise_for_status()
+        result = await response.json()
+
+    # Todo - do not log this or return this to client (it's a hidden implementation detail)
+    logger.debug(f"Created account: {result}")
+    # Todo - link the payment channel account_id to the peer channel account
+
+    return web.HTTPOk()
+
+
 async def get_account(request: web.Request) -> web.Response:
+    """Two alternative forms of authentication. Either Bearer Token auth required"""
     app_state: ApplicationState = request.app['app_state']
     sqlite_db: SQLiteDatabase = app_state.sqlite_db
 

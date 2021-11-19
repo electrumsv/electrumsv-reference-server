@@ -38,11 +38,10 @@ class HeadersWebSocket(web.View):
     async def _send_chain_tip(self, client: WSClient):
         """Called once on initial connection"""
         client_session: aiohttp.ClientSession = self.request.app['client_session']
-        HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-        HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+        app_state = self.request.app['app_state']
         try:
             request_headers = {'Accept': 'application/json'}
-            url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+            url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/tips"
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.json()
                 for tip in result:
@@ -53,7 +52,7 @@ class HeadersWebSocket(web.View):
 
             # Todo: this should actually be 'Accept' but HeaderSV uses 'Content-Type'
             request_headers = {'Content-Type': 'application/octet-stream'}
-            url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{current_best_hash}"
+            url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{current_best_hash}"
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.read()
                 self.logger.debug(f"Sending tip to new websocket connection, ws_id: {client.ws_id}")
@@ -63,7 +62,7 @@ class HeadersWebSocket(web.View):
                 await client.websocket.send_bytes(response)
         except aiohttp.ClientConnectorError as e:
             # When HeaderSV comes back online there will be a compensating chain tip notification
-            self.logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+            self.logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
             pass
 
     async def _handle_new_connection(self, client: WSClient):
