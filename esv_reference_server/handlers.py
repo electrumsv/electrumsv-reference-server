@@ -28,6 +28,36 @@ async def error(request: web.Request) -> web.Response:
     raise ValueError("This is a test of raising an exception in the handler")
 
 
+async def get_header(request: web.Request) -> web.Response:
+    client_session: aiohttp.ClientSession = request.app['client_session']
+    HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
+    HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+
+    accept_type = request.headers.get('Accept')
+    blockhash = request.match_info.get('hash')
+    if not blockhash:
+        return web.HTTPNotFound()
+
+    try:
+        url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{blockhash}"
+        if accept_type == 'application/octet-stream':
+            request_headers = {'Content-Type': 'application/octet-stream'}  # Should be 'Accept'
+            async with client_session.get(url_to_fetch, headers=request_headers) as response:
+                result = await response.read()
+            response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
+            return web.Response(body=result, status=200, reason='OK', headers=response_headers)
+
+        # else: application/json
+        request_headers = {'Content-Type': 'application/json'}  # Should be 'Accept'
+        async with client_session.get(url_to_fetch, headers=request_headers) as response:
+            result = await response.json()
+        response_headers = {'User-Agent': 'ESV-Ref-Server'}
+        return web.json_response(result, status=200, reason='OK', headers=response_headers)
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+        return web.HTTPServiceUnavailable()
+
+
 async def get_headers_by_height(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
     HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')

@@ -154,7 +154,8 @@ def get_aiohttp_app() -> web.Application:
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         app.add_routes([
-            web.get("/api/v1/headers", handlers.get_headers_by_height),
+            web.get("/api/v1/header/{hash}", handlers.get_header),
+            web.get("/api/v1/header", handlers.get_headers_by_height),
             web.get("/api/v1/chain/tips", handlers.get_chain_tips),
             web.view("/api/v1/headers/websocket", HeadersWebSocket),
         ])
