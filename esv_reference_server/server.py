@@ -14,7 +14,7 @@ from typing import Dict, NoReturn
 
 from .constants import SERVER_HOST, SERVER_PORT
 from .handlers_ws import HeadersWebSocket, WSClient
-from . import handlers
+from . import handlers, handlers_peer_channels
 from .sqlite_db import SQLiteDatabase
 
 
@@ -161,7 +161,17 @@ def get_aiohttp_app() -> web.Application:
         ])
 
     if os.getenv("EXPOSE_PEER_CHANNEL_APIS") == "1":
-        pass  # TBD
+        app.add_routes([
+            web.get("/api/v1/account/channel/list", handlers_peer_channels.list_channels),
+            web.get("/api/v1/account/channel/{channelid}", handlers_peer_channels.get_single_channel_details),
+            web.post("/api/v1/account/channel/{channelid}", handlers_peer_channels.update_single_channel_properties),
+            web.delete("/api/v1/account/channel/{channelid}", handlers_peer_channels.delete_channel),
+            web.post("/api/v1/account/channel", handlers_peer_channels.create_new_channel),
+            web.get("/api/v1/account/channel/{channelid}/api-token/{tokenid}", handlers_peer_channels.get_token_details),
+            web.delete("/api/v1/account/channel/{channelid}/api-token/{tokenid}", handlers_peer_channels.revoke_selected_token),
+            web.get("/api/v1/account/channel/{channelid}/api-token", handlers_peer_channels.get_list_of_tokens),
+            web.post("/api/v1/account/channel/{channelid}/api-token", handlers_peer_channels.create_new_token_for_channel),
+        ])
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
         pass  # TBD
