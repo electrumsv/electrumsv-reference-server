@@ -8,10 +8,55 @@ import os
 import queue
 import sqlite3
 import threading
+import time
 from pathlib import Path
-from typing import Set, List, Optional, Tuple
+from typing import Any, Set, List, NamedTuple, Optional, Tuple
 
-from bitcoinx import hash_to_hex_str, hex_str_to_hash
+from .constants import AccountFlags, ChannelState
+
+
+class AccountMetadata(NamedTuple):
+    # The identity public key for this client.
+    public_key_bytes: bytes
+    # The active API key for this client.
+    api_key: str
+    # This is the account funding payment channel for this account. It is possible we may later
+    # want to have multiple payment channels for a given account, for different purposes.
+    active_channel_id: Optional[int]
+    flags: AccountFlags
+    # For each payment channel the client opens with the server we increment this number.
+    last_payment_key_index: int
+
+
+class ChannelRow(NamedTuple):
+    account_id: int
+    channel_id: int
+    channel_state: ChannelState
+    # The key derivation information that tells us how to derive the payment key we gave the client.
+    payment_key_index: int
+    # The payment key we derived to give the client.
+    payment_key_bytes: bytes
+    # The hash of the funding transaction.
+    funding_transaction_hash: Optional[bytes]
+    # The funding output script from the funding transaction.
+    funding_output_script_bytes: Optional[bytes]
+    # How much the funding output value is in the funding transaction.
+    funding_value: int
+    client_payment_key_bytes: Optional[bytes]
+    contract_transaction_bytes: Optional[bytes]
+    refund_signature_bytes: Optional[bytes]
+    # This is the latest refund amount based on updates from the client.
+    refund_value: int
+    # This is incremented with every updated refund amount from the client.
+    refund_sequence: int
+    # How much they have allocated from the funding to us.
+    prepaid_balance_value: int
+    # How much of the allocated funding they have "paid" to us.
+    spent_balance_value: int
+
+
+class DatabaseStateModifiedError(Exception):
+    pass
 
 
 class LeakedSQLiteConnectionError(Exception):
@@ -121,7 +166,7 @@ class SQLiteDatabase:
     def is_closed(self) -> bool:
         return self._connection_pool.qsize() == 0
 
-    def execute(self, sql: str, params: Optional[tuple]=None) -> List:
+    def execute(self, sql: str, params: Optional[tuple]=None) -> List[Any]:
         """Thread-safe"""
         connection = self.acquire_connection()
         try:
@@ -131,65 +176,260 @@ class SQLiteDatabase:
                 cur: sqlite3.Cursor = connection.execute(sql, params)
             connection.commit()
             return cur.fetchall()
-        except sqlite3.IntegrityError as e:
-            if str(e).find('UNIQUE constraint failed') != -1:
-                pass
-                # self.logger.debug(f"caught unique constraint violation "
-                #                   f"- skipped redundant insertion")
-                # self.logger.debug(f"caught unique constraint violation: {sql} "
-                #                   f"- skipped redundant insertion")
         except Exception:
             connection.rollback()
             self.logger.exception(f"An unexpected exception occured for SQL: {sql}")
+            raise
+        finally:
+            self.release_connection(connection)
+
+    def execute2(self, sql: str, params: Optional[tuple]=None) -> sqlite3.Cursor:
+        """Thread-safe
+        This returns the cursor to allow the caller to get rowcount or whatever.
+        """
+        connection = self.acquire_connection()
+        try:
+            if not params:
+                cur: sqlite3.Cursor = connection.execute(sql)
+            else:
+                cur: sqlite3.Cursor = connection.execute(sql, params)
+            connection.commit()
+            return cur
+        except Exception:
+            connection.rollback()
+            self.logger.exception(f"An unexpected exception occured for SQL: {sql}")
+            raise
         finally:
             self.release_connection(connection)
 
     def create_tables(self):
         self.create_account_table()
+        self.create_account_payment_channel_table()
 
     def drop_tables(self):
+        self.drop_account_payment_channel_table()
         self.drop_account_table()
 
     def reset_tables(self):
         self.drop_tables()
         self.create_tables()
 
+    # SECTION: Accounts
+
     def create_account_table(self) -> None:
-        sql = (
-            """
-            CREATE TABLE IF NOT EXISTS accounts (
-                account_id          INTEGER,
-                public_key_bytes    BINARY(32),
-                api_key             TEXT
-            )"""
+        sql = f"""
+        CREATE TABLE IF NOT EXISTS accounts (
+            account_id              INTEGER PRIMARY KEY,
+            flags                   INTEGER DEFAULT {AccountFlags.MID_CREATION},
+            public_key_bytes        BINARY(32),
+            active_channel_id       INTEGER DEFAULT NULL,
+            last_payment_key_index  INTEGER DEFAULT 0,
+            api_key                 TEXT DEFAULT NULL
         )
+        """
         self.execute(sql)
 
     def drop_account_table(self) -> None:
-        sql = (
-            """DROP TABLE IF EXISTS accounts"""
-        )
+        sql = "DROP TABLE IF EXISTS accounts"
         self.execute(sql)
 
-    def get_account_id_for_api_key(self, api_key: str) -> Optional[int]:
-        sql = "SELECT account_id FROM accounts WHERE api_key = ?"
-        result = self.execute(sql, params=(api_key,))
-        if len(result) == 0:
-            return None
-        account_id: int = result[0][0]
+    def create_account(self, public_key_bytes: bytes) -> int:
+        sql = """
+        INSERT INTO accounts (public_key_bytes) VALUES (?)
+        """
+        cursor = self.execute2(sql, (public_key_bytes,))
+        # This should be set for INSERT and REPLACE operations.
+        assert cursor.lastrowid is not None
+        account_id: int = cursor.lastrowid
         return account_id
 
-    def get_account_id_for_public_key_bytes(self, public_key_bytes: bytes) -> Optional[int]:
+    def deactivate_account(self, account_id: int, flags: AccountFlags) -> None:
+        sql = """
+        UPDATE accounts SET flags=flags|? WHERE account_id=?
+        """
+        assert flags & AccountFlags.DISABLED_MASK != 0
+        self.execute2(sql, (flags, account_id))
+
+    def get_account_id_for_api_key(self, api_key: str) -> Tuple[Optional[int], AccountFlags]:
+        """
+        This is not indicative of whether there is an account or not as disabled accounts will
+        not be matched. If the account is valid, then and only then should the account id be
+        returned.
+        """
+        sql = "SELECT account_id, account_flags FROM accounts WHERE api_key=? AND flags&?=0"
+        result = self.execute(sql, params=(api_key, AccountFlags.DISABLED_MASK))
+        if len(result) == 0:
+            return None, AccountFlags.NONE
+        account_id: int
+        account_flags: AccountFlags
+        account_id, account_flags = result[0]
+        return account_id, account_flags
+
+    def get_account_id_for_public_key_bytes(self, public_key_bytes: bytes) \
+            -> Tuple[Optional[int], AccountFlags]:
+        """
+        If an account id is returned the caller should check the account flags before using
+        that account id. An example of this is checking the DISABLED_MASK and not authorising
+        the action if it is disabled.
+        """
         sql = "SELECT account_id FROM accounts WHERE public_key_bytes = ?"
         result = self.execute(sql, params=(public_key_bytes,))
         if len(result) == 0:
-            return None
-        account_id: int = result[0][0]
-        return account_id
+            return None, AccountFlags.NONE
+        account_id: int
+        account_flags: AccountFlags
+        account_id, account_flags = result[0]
+        return account_id, account_flags
 
-    def get_account_metadata_for_account_id(self, account_id: int) -> Tuple[bytes, str]:
-        sql = "SELECT public_key_bytes, api_key FROM accounts WHERE account_id = ?"
+    def get_account_metadata_for_account_id(self, account_id: int) -> AccountMetadata:
+        sql = """
+        SELECT public_key_bytes, api_key, active_channel_id, flags, last_payment_key_index
+        FROM accounts WHERE account_id = ?
+        """
         result = self.execute(sql, params=(account_id,))
         if len(result) == 0:
-            return b'', ''
-        return result[0]
+            return AccountMetadata(b'', '', None, AccountFlags.NONE, 0)
+        return AccountMetadata(*result[0])
+
+    def set_account_registered(self, account_id: int) -> None:
+        sql = "UPDATE accounts SET flags=flags&? WHERE flags&?=?"
+        cursor = self.execute2(sql, (~AccountFlags.MID_CREATION, AccountFlags.MID_CREATION,
+            AccountFlags.MID_CREATION, account_id))
+        if cursor.rowcount != 1:
+            raise DatabaseStateModifiedError
+
+    # SECTION: Account payment channels
+
+    def create_account_payment_channel_table(self) -> None:
+        #   refund_locktime         - Used to identify when the payment channel will close.
+        sql = """
+        CREATE TABLE IF NOT EXISTS account_payment_channels (
+            channel_id                  INTEGER PRIMARY KEY,
+            account_id                  INTEGER NOT NULL,
+            channel_state               INTEGER NOT NULL,
+            payment_key_index           INTEGER NOT NULL,
+            payment_key_bytes           BINARY(32) NOT NULL,
+            funding_value               INTEGER DEFAULT 0,
+            refund_value                INTEGER DEFAULT 0,
+            refund_locktime             INTEGER DEFAULT 0,
+            refund_sequence             INTEGER DEFAULT 0,
+            funding_transaction_bytes   BLOB DEFAULT NULL,
+            funding_transaction_hash    BINARY(32) DEFAULT NULL,
+            funding_output_script_bytes BLOB DEFAULT NULL,
+            contract_transaction_bytes    BLOB DEFAULT NULL,
+            refund_signature_bytes      BLOB DEFAULT NULL,
+            client_payment_key_bytes    BINARY(32) DEFAULT NULL,
+            prepaid_balance_value       INTEGER DEFAULT 0,
+            spent_balance_value         INTEGER DEFAULT 0,
+            date_created                INTEGER NOT NULL,
+            FOREIGN KEY(account_id) REFERENCES accounts (account_id)
+        )
+        """
+        self.execute(sql)
+
+    def drop_account_payment_channel_table(self) -> None:
+        sql = "DROP TABLE IF EXISTS account_payment_channels"
+        self.execute(sql)
+
+    def create_account_payment_channel(self, account_id: int, payment_key_index: int,
+            payment_key_bytes: bytes) -> None:
+        # It is expected the caller has already ruled out a payment channel already being in
+        # place, and that this is dealt with before creating a new one.
+        sql = """
+        SELECT active_channel_id FROM accounts WHERE account_id=?
+        """
+        rows = self.execute(sql, (account_id,))
+        assert len(rows) == 0 or rows[0][0] is None
+
+        channel_state = ChannelState.PAYMENT_KEY_DISPENSED
+        sql = """
+        INSERT INTO account_payment_channels (account_id, channel_state, payment_key_index,
+            payment_key_bytes, date_created)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        date_created = int(time.time())
+        cursor = self.execute2(sql, (account_id, channel_state, payment_key_index,
+            payment_key_bytes, date_created))
+        # This should be set for INSERT and REPLACE operations.
+        assert cursor.lastrowid is not None
+        channel_id = cursor.lastrowid
+        sql = """
+        UPDATE accounts SET active_channel_id=?, last_payment_key_index=? WHERE account_id=?
+        """
+        self.execute(sql, (channel_id, payment_key_index, account_id))
+
+    def delete_account_payment_channel(self, channel_id: int) -> None:
+        sql = "DELETE FROM account_payment_channels WHERE channel_id=?"
+        self.execute(sql, (channel_id,))
+
+    def get_active_channel_for_account_id(self, account_id: int) -> Optional[ChannelRow]:
+        sql = """
+        SELECT account_id, channel_id, channel_state, payment_key_index, payment_key_bytes,
+            funding_transaction_hash, funding_output_script_bytes, funding_value,
+            client_payment_key_bytes, contract_transaction_bytes, refund_signature_bytes,
+            refund_value, refund_sequence, prepaid_balance_value, spent_balance_value
+        FROM account_payment_channels APC
+        INNER JOIN accounts A ON A.active_channel_id=APC.channel_id
+        WHERE A.account_id=? AND A.active_channel_id IS NOT NULL
+        """
+        result = self.execute(sql, params=(account_id,))
+        if len(result) == 0:
+            return None
+        return ChannelRow(*result[0])
+
+    def set_payment_channel_initial_contract_transaction(self, channel_id: int, funding_value: int,
+            refund_value: int, refund_signature_bytes: bytes,
+            contract_transaction_bytes: bytes, client_payment_key_bytes: bytes) -> None:
+        sql = """
+        UPDATE account_payment_channels
+        SET channel_state=?, funding_value=?, refund_value=?, refund_signature_bytes=?,
+            contract_transaction_bytes=?, client_payment_key_bytes=?
+        WHERE channel_id=? AND channel_state=?
+        """
+        cursor = self.execute2(sql, (ChannelState.REFUND_ESTABLISHED, funding_value,
+            refund_value, refund_signature_bytes, contract_transaction_bytes,
+            client_payment_key_bytes, channel_id, ChannelState.PAYMENT_KEY_DISPENSED))
+        if cursor.rowcount != 1:
+            raise DatabaseStateModifiedError
+
+    def update_payment_channel_contract(self, channel_id: int, refund_value: int,
+            refund_signature_bytes: bytes, refund_sequence: int) -> None:
+        sql = """
+        UPDATE account_payment_channels
+        SET refund_value=?, refund_signature_bytes=?, refund_sequence=?
+        WHERE channel_id=? AND channel_state=?
+        """
+        cursor = self.execute2(sql, (ChannelState.REFUND_ESTABLISHED, refund_value,
+            refund_signature_bytes, refund_sequence, channel_id, ChannelState.CONTRACT_OPEN))
+        if cursor.rowcount != 1:
+            raise DatabaseStateModifiedError
+
+    def set_payment_channel_funding_transaction(self, channel_id: int,
+            funding_transaction_bytes: bytes, funding_output_script_bytes: bytes) -> None:
+        sql = """
+        UPDATE account_payment_channels
+        SET channel_state=?, funding_transaction_bytes=?, funding_output_script_bytes=?
+        WHERE channel_id=? AND channel_state=?
+        """
+        cursor = self.execute2(sql, (ChannelState.CONTRACT_OPEN, funding_transaction_bytes,
+            funding_output_script_bytes, channel_id, ChannelState.REFUND_ESTABLISHED))
+        if cursor.rowcount != 1:
+            raise DatabaseStateModifiedError
+
+    def set_payment_channel_closed(self, channel_id: int, channel_state: ChannelState) -> None:
+        """
+
+        Raises DatabaseStateModifiedError
+        """
+        sql = """
+        UPDATE account_payment_channels SET channel_state=?
+        WHERE channel_id=? AND channel_state<?
+        """
+        cursor = self.execute2(sql, (channel_state, channel_id, ChannelState.CLOSED_MARKER))
+        if cursor.rowcount != 1:
+            raise DatabaseStateModifiedError
+
+        sql = "UPDATE accounts SET active_channel_id=NULL WHERE channel_id=?"
+        cursor = self.execute2(sql, (channel_id,))
+        if cursor.rowcount != 1:
+            raise DatabaseStateModifiedError

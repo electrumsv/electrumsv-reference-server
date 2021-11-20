@@ -10,10 +10,11 @@ import os
 import logging
 import queue
 import threading
-from typing import Dict, NoReturn
+from typing import AsyncIterator, Dict
 
-from .constants import SERVER_HOST, SERVER_PORT
+from .constants import Network, SERVER_HOST, SERVER_PORT
 from .handlers_ws import HeadersWebSocket, WSClient
+from .keys import create_regtest_server_keys, ServerKeys
 from . import handlers
 from .sqlite_db import SQLiteDatabase
 
@@ -30,8 +31,10 @@ requests_logger.setLevel(logging.WARNING)
 
 
 class ApplicationState(object):
+    server_keys: ServerKeys
 
-    def __init__(self, app: web.Application, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, app: web.Application, loop: asyncio.AbstractEventLoop,
+            network: Network) -> None:
         self.logger = logging.getLogger('app_state')
         self.app = app
         self.loop = loop
@@ -40,6 +43,7 @@ class ApplicationState(object):
         self.ws_clients_lock: threading.RLock = threading.RLock()
         self.ws_queue: queue.Queue[str] = queue.Queue()  # json only
 
+        self.network = network
         self.sqlite_db = SQLiteDatabase(MODULE_DIR.parent / 'esv_reference_server.db')
 
     def start_threads(self):
@@ -115,7 +119,7 @@ class ApplicationState(object):
             self.logger.info("Closing push notifications thread")
 
 
-async def client_session_ctx(app: web.Application) -> NoReturn:
+async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
     """
     Cleanup context async generator to create and properly close aiohttp ClientSession
 
@@ -134,11 +138,19 @@ async def client_session_ctx(app: web.Application) -> NoReturn:
     await app['client_session'].close()
 
 
-def get_aiohttp_app() -> web.Application:
+def get_aiohttp_app(network: Network) -> web.Application:
     loop = asyncio.get_event_loop()
     app = web.Application()
     app.cleanup_ctx.append(client_session_ctx)
-    app_state = ApplicationState(app, loop)
+    app_state = ApplicationState(app, loop, network)
+
+    if network == Network.REGTEST:
+        # TODO(temporary-prototype-choice) Allow regtest key override or fallback to these?
+        app_state.server_keys = create_regtest_server_keys()
+    else:
+        # TODO(temporary-prototype-choice) Have some way of finding the non-regtest keys.
+        #     Error if they cannot be found.
+        raise NotImplementedError
 
     # This is the standard aiohttp way of managing state within the handlers
     app['app_state'] = app_state
@@ -149,7 +161,12 @@ def get_aiohttp_app() -> web.Application:
         web.get("/", handlers.ping),
         web.get("/error", handlers.error),
         web.get("/api/v1/endpoints", handlers.get_endpoints_data),
-        web.get("/api/v1/account", handlers.get_account)
+        web.get("/api/v1/account", handlers.get_account),
+        web.post("/api/v1/account/key", handlers.post_account_key),
+        web.post("/api/v1/account/channel", handlers.post_account_channel),
+        web.put("/api/v1/account/channel", handlers.put_account_channel_update),
+        web.delete("/api/v1/account/channel", handlers.delete_account_channel),
+        web.post("/api/v1/account/funding", handlers.post_account_funding),
     ])
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
@@ -170,5 +187,5 @@ def get_aiohttp_app() -> web.Application:
 
 
 if __name__ == "__main__":
-    app = get_aiohttp_app()
+    app = get_aiohttp_app(Network.REGTEST)
     web.run_app(app, host=SERVER_HOST, port=SERVER_PORT)

@@ -9,11 +9,11 @@ from typing import Optional
 
 from aiohttp import web
 
+from esv_reference_server.server import get_aiohttp_app
+from esv_reference_server.constants import Network, SERVER_HOST, SERVER_PORT
+
 if typing.TYPE_CHECKING:
     from .esv_reference_server.server import ApplicationState
-
-
-from esv_reference_server.server import get_aiohttp_app, SERVER_HOST, SERVER_PORT
 
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -94,7 +94,7 @@ async def main():
     setup_logging()
     dotenv_path = MODULE_DIR.joinpath('.env')
     load_dotenv(dotenv_path)
-    app = get_aiohttp_app()
+    app = get_aiohttp_app(Network.REGTEST)
     server = AiohttpServer(app)
     try:
         await server.start()
