@@ -1,5 +1,6 @@
-# Open BSV License version 3
-# Copyright (c) 2021 Bitcoin Association
+# Open BSV License version 4
+#
+# Copyright (c) 2021 Bitcoin Association for BSV ("Bitcoin Association")
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -10,13 +11,20 @@
 #
 # 1 - The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
+#
 # 2 - The Software, and any software that is derived from the Software or parts thereof,
 # can only be used on the Bitcoin SV blockchains. The Bitcoin SV blockchains are defined,
 # for purposes of this license, as the Bitcoin blockchain containing block height #556767
 # with the hash "000000000000000001d956714215d96ffc00e0afda4cd0a96c96f8d802b1662b" and
-# that contains the longest persistent chain of blocks that are accepted by the un-modified
-# Software, as well as the test blockchains that contain blocks that are accepted by the
-# un-modified Software.
+# that contains the longest persistent chain of blocks accepted by this Software and which
+# are valid under the rules set forth in the Bitcoin white paper (S. Nakamoto, Bitcoin: A
+# Peer-to-Peer Electronic Cash System, posted online October 2008) and the latest version
+# of this Software available in this repository or another repository designated by Bitcoin
+# Association, as well as the test blockchains that contain the longest persistent chains
+# of blocks accepted by this Software and which are valid under the rules set forth in the
+# Bitcoin whitepaper (S. Nakamoto, Bitcoin: A Peer-to-Peer Electronic Cash System, posted
+# online October 2008) and the latest version of this Software available in this repository,
+# or another repository designated by Bitcoin Association
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,7 +33,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-#
+
 
 from __future__ import annotations
 from enum import IntEnum
@@ -120,11 +128,14 @@ def validate_json_envelope(server_data: NetworkServer, json_response: JSONEnvelo
 
     Raises a `InvalidJSONEnvelopeError` to indicate that the signature is invalid.
     """
+    if server_data["public_key"] is None:
+        return
+
     message_bytes = json_response["payload"].encode()
     if json_response["signature"] is not None and json_response["publicKey"] is not None:
         signature_bytes = bytes.fromhex(json_response["signature"])
         public_key = PublicKey.from_hex(json_response["publicKey"])
-        if server_data["public_key"] is not None and server_data["public_key"] != public_key:
+        if server_data["public_key"] != public_key:
             raise InvalidJSONEnvelopeError("MAPI public key does not match local version")
         if not public_key.verify_der_signature(signature_bytes, message_bytes):
             raise InvalidJSONEnvelopeError("MAPI signature invalid")

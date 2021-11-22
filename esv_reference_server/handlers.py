@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import logging
 import time
 from typing import Any, Dict, Optional, TYPE_CHECKING
+import uuid
 
 import aiohttp
 from aiohttp import web
@@ -173,6 +174,7 @@ async def post_account_key(request: web.Request) -> web.Response:
     payment_key_index: int = 0
     payment_key_bytes: Optional[bytes] = None
     auth_string = request.headers.get('Authorization', None)
+    api_key: str
     if auth_string is not None:
         if not auth_string.startswith("Bearer "):
             raise web.HTTPBadRequest
@@ -207,7 +209,7 @@ async def post_account_key(request: web.Request) -> web.Response:
             raise web.HTTPUnauthorized
 
         if account_id is None:
-            account_id = db.create_account(account_public_key_bytes)
+            account_id, api_key = db.create_account(account_public_key_bytes)
             payment_key_index = 1
         else:
             metadata = db.get_account_metadata_for_account_id(account_id)
@@ -223,13 +225,24 @@ async def post_account_key(request: web.Request) -> web.Response:
                 if metadata.active_channel_id is not None:
                     raise web.HTTPConflict
             payment_key_index = metadata.last_payment_key_index + 1
+            api_key = metadata.api_key
 
     # Ensure all paths that reach here have set an index to use.
     assert payment_key_index > 0
     payment_key_bytes = generate_payment_public_key(server_keys.identity_public_key,
         account_public_key_bytes, payment_key_index).to_bytes()
     db.create_account_payment_channel(account_id, payment_key_index, payment_key_bytes)
-    return web.Response(text=payment_key_bytes.hex())
+
+    mpwriter = aiohttp.MultipartWriter()
+    part = mpwriter.append(payment_key_bytes)
+    part.set_content_disposition('inline', name="key")
+
+    part = mpwriter.append(api_key)
+    part.set_content_disposition('inline', name="api-key")
+
+    response = web.Response()
+    response.body = mpwriter
+    return response
 
 
 async def post_account_channel(request: web.Request) -> web.Response:
@@ -268,7 +281,7 @@ async def post_account_channel(request: web.Request) -> web.Response:
             funding_script_bytes = await part_reader.read(decode=True)
             funding_p2ms = process_funding_script(funding_script_bytes,
                 channel_row.payment_key_bytes)
-            if funding_p2ms is not None:
+            if funding_p2ms is None:
                 raise web.HTTPBadRequest(reason="Invalid 'script' multipart payload")
         elif part_reader.name == "transaction":
             contract_transaction_bytes = await part_reader.read(decode=True)
@@ -286,15 +299,16 @@ async def post_account_channel(request: web.Request) -> web.Response:
     if account_metadata is None:
         raise web.HTTPUnauthorized
     try:
-        client_payment_key_bytes, refund_signature_bytes = process_refund_contract_transaction(
-            contract_transaction_bytes, delivery_time, funding_value, funding_p2ms,
-            app_state.server_keys, account_metadata, channel_row)
+        client_payment_key_bytes, funding_transaction_hash, refund_signature_bytes = \
+            process_refund_contract_transaction(
+                contract_transaction_bytes, delivery_time, funding_value, funding_p2ms,
+                app_state.server_keys, account_metadata, channel_row)
     except InvalidTransactionError as exc:
         raise web.HTTPBadRequest(reason=exc.args[0])
 
     db.set_payment_channel_initial_contract_transaction(channel_row.channel_id,
-        funding_value, funding_value, refund_signature_bytes, contract_transaction_bytes,
-        client_payment_key_bytes)
+        funding_value, funding_transaction_hash, funding_value, refund_signature_bytes,
+        contract_transaction_bytes, client_payment_key_bytes)
     return web.Response(body=refund_signature_bytes, content_type="application/octet-stream")
 
 
@@ -493,12 +507,12 @@ async def get_endpoints_data(request: web.Request) -> web.Response:
             {
                 "apiType": "bsvapi.account",
                 "apiVersion": 1,
-                "baseURL": "/api/v1/account",
+                "baseUrl": "/api/v1/account",
             },
             {
                 "apiType": "bsvapi.header",
                 "apiVersion": 1,
-                "baseURL": "/api/v1/headers",
+                "baseUrl": "/api/v1/headers",
             },
         ]
     }

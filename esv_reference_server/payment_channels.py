@@ -1,5 +1,6 @@
-# Open BSV License version 3
-# Copyright (c) 2021 Bitcoin Association
+# Open BSV License version 4
+#
+# Copyright (c) 2021 Bitcoin Association for BSV ("Bitcoin Association")
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -10,13 +11,20 @@
 #
 # 1 - The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
+#
 # 2 - The Software, and any software that is derived from the Software or parts thereof,
 # can only be used on the Bitcoin SV blockchains. The Bitcoin SV blockchains are defined,
 # for purposes of this license, as the Bitcoin blockchain containing block height #556767
 # with the hash "000000000000000001d956714215d96ffc00e0afda4cd0a96c96f8d802b1662b" and
-# that contains the longest persistent chain of blocks that are accepted by the un-modified
-# Software, as well as the test blockchains that contain blocks that are accepted by the
-# un-modified Software.
+# that contains the longest persistent chain of blocks accepted by this Software and which
+# are valid under the rules set forth in the Bitcoin white paper (S. Nakamoto, Bitcoin: A
+# Peer-to-Peer Electronic Cash System, posted online October 2008) and the latest version
+# of this Software available in this repository or another repository designated by Bitcoin
+# Association, as well as the test blockchains that contain the longest persistent chains
+# of blocks accepted by this Software and which are valid under the rules set forth in the
+# Bitcoin whitepaper (S. Nakamoto, Bitcoin: A Peer-to-Peer Electronic Cash System, posted
+# online October 2008) and the latest version of this Software available in this repository,
+# or another repository designated by Bitcoin Association
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,11 +33,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-#
+
 
 import math
 import struct
-from typing import cast, Tuple, Optional
+from typing import Tuple, Optional
 
 from bitcoinx import Bitcoin, classify_output_script, double_sha256, InterpreterError, Ops, \
     P2MultiSig_Output, pack_byte, PrivateKey, PublicKey, Script, SigHash, Signature, \
@@ -84,7 +92,7 @@ def process_funding_script(script_bytes: bytes, server_payment_key_bytes: bytes)
 
 def process_refund_contract_transaction(contract_transaction_bytes: bytes, delivery_time: int,
         funding_value: int, funding_output_script: P2MultiSig_Output, server_keys: ServerKeys,
-        account_metadata: AccountMetadata, channel_row: ChannelRow) -> Tuple[bytes, bytes]:
+        account_metadata: AccountMetadata, channel_row: ChannelRow) -> Tuple[bytes, bytes, bytes]:
     """
     The way a payment channel is set up, is by the client first getting the server to sign a
     version of the contract transaction that fully refunds the coins that the client is
@@ -168,7 +176,7 @@ def process_refund_contract_transaction(contract_transaction_bytes: bytes, deliv
         funding_output_script.to_script_bytes(), funding_value, refund_private_key)
 
     client_refund_payment_key_bytes = funding_output_script.public_keys[client_key_index].to_bytes()
-    return client_refund_payment_key_bytes, server_refund_signature_bytes
+    return client_refund_payment_key_bytes, tx_input.prev_hash, server_refund_signature_bytes
 
 
 async def process_funding_transaction_async(transaction_bytes: bytes,

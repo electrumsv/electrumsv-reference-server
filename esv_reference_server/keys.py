@@ -50,7 +50,3 @@ def generate_payment_private_key(server_identity_private_key: PrivateKey,
     payment_key = server_identity_private_key.add(message_hash)
     return payment_key
 
-
-# TODO(unittest) That the payment public and private keys match.
-# TODO(unittest) That the payment public and private keys match with an 'extra_message'.
-

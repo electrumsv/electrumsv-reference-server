@@ -233,15 +233,16 @@ class SQLiteDatabase:
         sql = "DROP TABLE IF EXISTS accounts"
         self.execute(sql)
 
-    def create_account(self, public_key_bytes: bytes) -> int:
+    def create_account(self, public_key_bytes: bytes) -> Tuple[int, str]:
         sql = """
-        INSERT INTO accounts (public_key_bytes) VALUES (?)
+        INSERT INTO accounts (public_key_bytes, api_key) VALUES (?, ?)
         """
-        cursor = self.execute2(sql, (public_key_bytes,))
+        api_key = os.urandom(32).hex()
+        cursor = self.execute2(sql, (public_key_bytes, api_key))
         # This should be set for INSERT and REPLACE operations.
         assert cursor.lastrowid is not None
         account_id: int = cursor.lastrowid
-        return account_id
+        return account_id, api_key
 
     def deactivate_account(self, account_id: int, flags: AccountFlags) -> None:
         sql = """
@@ -256,7 +257,7 @@ class SQLiteDatabase:
         not be matched. If the account is valid, then and only then should the account id be
         returned.
         """
-        sql = "SELECT account_id, account_flags FROM accounts WHERE api_key=? AND flags&?=0"
+        sql = "SELECT account_id, flags FROM accounts WHERE api_key=? AND flags&?=0"
         result = self.execute(sql, params=(api_key, AccountFlags.DISABLED_MASK))
         if len(result) == 0:
             return None, AccountFlags.NONE
@@ -272,7 +273,7 @@ class SQLiteDatabase:
         that account id. An example of this is checking the DISABLED_MASK and not authorising
         the action if it is disabled.
         """
-        sql = "SELECT account_id FROM accounts WHERE public_key_bytes = ?"
+        sql = "SELECT account_id, flags FROM accounts WHERE public_key_bytes = ?"
         result = self.execute(sql, params=(public_key_bytes,))
         if len(result) == 0:
             return None, AccountFlags.NONE
@@ -292,9 +293,9 @@ class SQLiteDatabase:
         return AccountMetadata(*result[0])
 
     def set_account_registered(self, account_id: int) -> None:
-        sql = "UPDATE accounts SET flags=flags&? WHERE flags&?=?"
+        sql = "UPDATE accounts SET flags=flags&? WHERE account_id=? AND flags&?=?"
         cursor = self.execute2(sql, (~AccountFlags.MID_CREATION, AccountFlags.MID_CREATION,
-            AccountFlags.MID_CREATION, account_id))
+            account_id, AccountFlags.MID_CREATION))
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
 
@@ -364,7 +365,7 @@ class SQLiteDatabase:
 
     def get_active_channel_for_account_id(self, account_id: int) -> Optional[ChannelRow]:
         sql = """
-        SELECT account_id, channel_id, channel_state, payment_key_index, payment_key_bytes,
+        SELECT APC.account_id, channel_id, channel_state, payment_key_index, payment_key_bytes,
             funding_transaction_hash, funding_output_script_bytes, funding_value,
             client_payment_key_bytes, contract_transaction_bytes, refund_signature_bytes,
             refund_value, refund_sequence, prepaid_balance_value, spent_balance_value
@@ -378,16 +379,17 @@ class SQLiteDatabase:
         return ChannelRow(*result[0])
 
     def set_payment_channel_initial_contract_transaction(self, channel_id: int, funding_value: int,
-            refund_value: int, refund_signature_bytes: bytes,
+            funding_transaction_hash: bytes, refund_value: int, refund_signature_bytes: bytes,
             contract_transaction_bytes: bytes, client_payment_key_bytes: bytes) -> None:
         sql = """
         UPDATE account_payment_channels
-        SET channel_state=?, funding_value=?, refund_value=?, refund_signature_bytes=?,
-            contract_transaction_bytes=?, client_payment_key_bytes=?
+        SET channel_state=?, funding_value=?, funding_transaction_hash=?, refund_value=?,
+            refund_signature_bytes=?, contract_transaction_bytes=?, client_payment_key_bytes=?
         WHERE channel_id=? AND channel_state=?
         """
         cursor = self.execute2(sql, (ChannelState.REFUND_ESTABLISHED, funding_value,
-            refund_value, refund_signature_bytes, contract_transaction_bytes,
+            funding_transaction_hash, refund_value, refund_signature_bytes,
+            contract_transaction_bytes,
             client_payment_key_bytes, channel_id, ChannelState.PAYMENT_KEY_DISPENSED))
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
@@ -396,7 +398,7 @@ class SQLiteDatabase:
             refund_signature_bytes: bytes, refund_sequence: int) -> None:
         sql = """
         UPDATE account_payment_channels
-        SET refund_value=?, refund_signature_bytes=?, refund_sequence=?
+        SET channel_state=?, refund_value=?, refund_signature_bytes=?, refund_sequence=?
         WHERE channel_id=? AND channel_state=?
         """
         cursor = self.execute2(sql, (ChannelState.REFUND_ESTABLISHED, refund_value,
@@ -429,7 +431,7 @@ class SQLiteDatabase:
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
 
-        sql = "UPDATE accounts SET active_channel_id=NULL WHERE channel_id=?"
+        sql = "UPDATE accounts SET active_channel_id=NULL WHERE active_channel_id=?"
         cursor = self.execute2(sql, (channel_id,))
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
