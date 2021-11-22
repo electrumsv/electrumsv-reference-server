@@ -323,9 +323,6 @@ async def send_contract_payment(account_api_url: str, api_key: str, funding_tran
 
 
 async def _run_client() -> None:
-    logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
-        level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
-
     account_api_url = await resolve_account_endpoint_url_async()
     if account_api_url is None:
         return
@@ -354,6 +351,12 @@ async def _run_client() -> None:
         funding_transaction, refund_transaction, refund_value)
     if contract_transaction is None:
         return
+
+    # TODO: Server unspent balance accounting is not implemented yet. Do something with that.
+    # TODO: Call a function accessible to fully registered users like ourselves now we have paid.
+    #       When we made the first payment, we moved from "mid-registration" to "registered".
+    #       This should allow us to call some API limited to paying users who have an unspent
+    #       prepaid balance (like us).
 
 
 async def run_client(event: asyncio.Event) -> None:
@@ -397,6 +400,9 @@ async def main() -> None:
 
 
 def run() -> None:
+    logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
+        level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
+
     asyncio.run(main())
 
 
