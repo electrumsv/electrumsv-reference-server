@@ -230,7 +230,7 @@ def create_refund_transaction(funding_transaction: Tx) -> Tx:
     return refund_transaction
 
 
-async def send_refund_transaction(account_api_url: str, api_key: str, funding_transaction: Tx,
+async def send_refund_transaction_async(account_api_url: str, api_key: str, funding_transaction: Tx,
         refund_transaction: Tx) -> Optional[bytes]:
     send_refund_transaction_url = account_api_url +"/channel"
 
@@ -273,7 +273,7 @@ def insert_server_signature(funding_transaction: Tx, refund_transaction: Tx,
     return False
 
 
-async def send_funding_transaction(account_api_url: str, api_key: str,
+async def send_funding_transaction_async(account_api_url: str, api_key: str,
         funding_transaction: Tx) -> bool:
     send_refund_transaction_url = account_api_url +"/funding"
 
@@ -293,7 +293,7 @@ async def send_funding_transaction(account_api_url: str, api_key: str,
             return True
 
 
-async def send_contract_payment(account_api_url: str, api_key: str, funding_transaction: Tx,
+async def send_contract_payment_async(account_api_url: str, api_key: str, funding_transaction: Tx,
         refund_transaction: Tx, new_refund_value: int) -> Optional[Tx]:
     send_refund_transaction_url = account_api_url +"/channel"
 
@@ -318,7 +318,7 @@ async def send_contract_payment(account_api_url: str, api_key: str, funding_tran
                 logger.error("unexpected status in refund endpoint response (bearer) %d (%s)",
                     response.status, response.reason)
                 return None
-            logging.info("contract payment accepted")
+            logger.info("contract payment accepted")
             return contract_transaction
 
 
@@ -335,7 +335,7 @@ async def _run_client() -> None:
     funding_transaction = create_funding_transaction(server_payment_key)
     refund_transaction = create_refund_transaction(funding_transaction)
 
-    server_signature_bytes = await send_refund_transaction(account_api_url, api_key,
+    server_signature_bytes = await send_refund_transaction_async(account_api_url, api_key,
         funding_transaction, refund_transaction)
     if server_signature_bytes is None:
         return
@@ -344,10 +344,10 @@ async def _run_client() -> None:
             server_signature_bytes):
         return
 
-    await send_funding_transaction(account_api_url, api_key, funding_transaction)
+    await send_funding_transaction_async(account_api_url, api_key, funding_transaction)
 
     refund_value = CONTRACT_FUNDING_VALUE - 10000
-    contract_transaction = await send_contract_payment(account_api_url, api_key,
+    contract_transaction = await send_contract_payment_async(account_api_url, api_key,
         funding_transaction, refund_transaction, refund_value)
     if contract_transaction is None:
         return
