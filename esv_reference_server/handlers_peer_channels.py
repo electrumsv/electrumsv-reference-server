@@ -24,10 +24,8 @@ def _verify_token(request: web.Request, sqlite_db: SQLiteDatabase):
         api_key = auth_string[7:]
         return api_key
 
+# ----- CHANNEL MANAGEMENT APIs ----- #
 
-# Todo - we need to create accounts on the users behalf programmatically (this can only be
-#  done via the commandline interface to Peer Channels)
-# Todo - we need the Bearer Token to determine which account it will list channels for
 async def list_channels(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
@@ -38,6 +36,8 @@ async def list_channels(request: web.Request) -> web.Response:
     except ValueError:
         return web.HTTPUnauthorized()
 
+    # Todo - app_state.peer_channel_account_id change to the user's account_id based on
+    #  Bearer token linkage in SQLiteDB
     url_to_fetch = f"{app_state.peer_channels_url}/api/v1/account/" \
         f"{app_state.peer_channel_account_id}/channel/list"
     request_headers = {'Accept': 'application/json'}
@@ -53,6 +53,9 @@ async def get_single_channel_details(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
 
     channelid = request.match_info.get('channelid')
+
+    # Todo - app_state.peer_channel_account_id change to the user's account_id based on
+    #  Bearer token linkage in SQLiteDB
     url_to_fetch = f"{app_state.peer_channels_url}/api/v1/account/{app_state.peer_channel_account_id}/channel/{channelid}"
     request_headers = {'Accept': 'application/json'}
     async with client_session.get(url_to_fetch, headers=request_headers,
@@ -89,3 +92,9 @@ async def get_list_of_tokens(request: web.Request) -> web.Response:
 async def create_new_token_for_channel(request: web.Request) -> web.Response:
     return web.HTTPNotImplemented()
 
+
+# ----- MESSAGE MANAGEMENT APIs ----- #
+# Todo - fill this in later...
+
+# ----- NOTIFICATION & PUSH NOTIFICATION API ----- #
+# Todo - fill this in later... (/api/v1/channel/{channelid}/notify)

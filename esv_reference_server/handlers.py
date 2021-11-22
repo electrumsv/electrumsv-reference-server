@@ -12,7 +12,7 @@ from aiohttp import web
 
 from .account import VerifiableKeyData, verify_key_data
 from .constants import SERVER_HOST, SERVER_PORT
-
+from .types import PeerChannelAccountRow
 
 if TYPE_CHECKING:
     from .server import ApplicationState
@@ -139,7 +139,16 @@ async def dummy_create_account(request: web.Request) -> web.Response:
 
     # Todo - do not log this or return this to client (it's a hidden implementation detail)
     logger.debug(f"Created account: {result}")
-    # Todo - link the payment channel account_id to the peer channel account
+
+    # link the main, global payment channel account_id to the peer channel account_id
+    # and basic auth credentials
+    account_row = PeerChannelAccountRow(
+        peer_channel_account_id=result['account_id'],
+        peer_channel_account_name=dummy_pubkey_hex,
+        peer_channel_username=dummy_pubkey_hex,
+        peer_channel_password=dummy_api_key,
+        account_id=dummy_account_id)
+    sqlite_db.insert_peer_channel_account(account_row)
 
     return web.HTTPOk()
 

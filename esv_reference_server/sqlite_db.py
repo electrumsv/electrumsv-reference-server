@@ -13,6 +13,8 @@ from typing import Set, List, Optional, Tuple
 
 from bitcoinx import hash_to_hex_str, hex_str_to_hash
 
+from esv_reference_server.types import PeerChannelAccountRow
+
 
 class LeakedSQLiteConnectionError(Exception):
     pass
@@ -178,6 +180,7 @@ class SQLiteDatabase:
             """
             CREATE TABLE IF NOT EXISTS peer_channel_accounts (
                 peer_channel_account_id  INTEGER,
+                peer_channel_account_name VARCHAR(256),
                 peer_channel_username    VARCHAR(256),
                 peer_channel_password    VARCHAR(1024),
                 account_id  INTEGER,
@@ -191,6 +194,10 @@ class SQLiteDatabase:
             """DROP TABLE IF EXISTS peer_channel_accounts"""
         )
         self.execute(sql)
+
+    def insert_peer_channel_account(self, account_row: PeerChannelAccountRow):
+        sql = """INSERT INTO peer_channel_accounts VALUES(?,?,?,?,?)"""
+        self.execute(sql, params=account_row)
 
     def get_account_id_for_api_key(self, api_key: str) -> Optional[int]:
         sql = "SELECT account_id FROM accounts WHERE api_key = ?"
