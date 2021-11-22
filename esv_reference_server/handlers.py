@@ -112,6 +112,7 @@ async def dummy_create_account(request: web.Request) -> web.Response:
 
     # Todo - replace this part with Roger's actual implementation when ready
     # ASSUME THAT PAYMENT CHANNEL CREATION WAS SUCCESSFUL AND A NEW ACCOUNT IS NOW CREATED WITH:
+    # Also assume the Authentication method was 'BSVKeyData'
     dummy_account_id = 12345
     dummy_pubkey_hex = '0000000000000000000000000000000000000000000000000000000000000000'
     dummy_api_key = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'
@@ -150,6 +151,9 @@ async def dummy_create_account(request: web.Request) -> web.Response:
         account_id=dummy_account_id)
     sqlite_db.insert_peer_channel_account(account_row)
 
+    # Todo - As per https://docs.google.com/document/d/1l_3ElDrkFa44A46yHqYWk5Xbmq7262aUUgVl-GICwss/edit
+    #  if the Authentication method was 'BSVKeyData' -> include the Bearer Token API key
+    #  in the response
     return web.HTTPOk()
 
 

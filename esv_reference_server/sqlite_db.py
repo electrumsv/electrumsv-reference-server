@@ -189,6 +189,28 @@ class SQLiteDatabase:
         )
         self.execute(sql)
 
+    def create_channels_table(self) -> None:
+        """
+        peer_channel_account_id:  is needed to proxy the request to backend
+                                   the PeerChannel instance
+        account_id:  is needed for pro-rata billing to the payment channel
+                     account
+        channel_id & channel_bearer_token:  random 64 byte base64.urlsafe fields
+                                            assigned when a new channel is created
+        """
+        sql = (
+            """
+            CREATE TABLE IF NOT EXISTS channels (
+                channel_id VARCHAR(256) PRIMARY KEY,
+                channel_bearer_token VARCHAR(256),
+                peer_channel_account_id INTEGER,
+                account_id  INTEGER,
+                FOREIGN KEY (peer_channel_account_id) REFERENCES peer_channel_accounts(account_id),
+                FOREIGN KEY(account_id) REFERENCES accounts(account_id)
+            )"""
+        )
+        self.execute(sql)
+
     def drop_peer_channel_accounts_table(self) -> None:
         sql = (
             """DROP TABLE IF EXISTS peer_channel_accounts"""
