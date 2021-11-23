@@ -6,12 +6,7 @@ from aiohttp import web
 import logging
 import uuid
 
-
-class WSClient(object):
-
-    def __init__(self, ws_id: str, websocket: web.WebSocketResponse):
-        self.ws_id = ws_id
-        self.websocket = websocket
+from esv_reference_server.types import HeadersWSClient
 
 
 class HeadersWebSocket(web.View):
@@ -25,24 +20,23 @@ class HeadersWebSocket(web.View):
         ws_id = str(uuid.uuid4())
 
         try:
-            client = WSClient(ws_id=ws_id, websocket=ws)
+            client = HeadersWSClient(ws_id=ws_id, websocket=ws)
             self.request.app['app_state'].add_ws_client(client)
             self.logger.debug('%s connected. host=%s.', client.ws_id, self.request.host)
             await self._handle_new_connection(client)
             return ws
         finally:
             await ws.close()
-            self.logger.debug("removing websocket id: %s", ws_id)
-            del self.request.app['ws_clients'][ws_id]
+            self.logger.debug("removing headers websocket id: %s", ws_id)
+            del self.request.app['headers_ws_clients'][ws_id]
 
-    async def _send_chain_tip(self, client: WSClient):
+    async def _send_chain_tip(self, client: HeadersWSClient):
         """Called once on initial connection"""
         client_session: aiohttp.ClientSession = self.request.app['client_session']
-        HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-        HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
+        app_state = self.request.app['app_state']
         try:
             request_headers = {'Accept': 'application/json'}
-            url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+            url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/tips"
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.json()
                 for tip in result:
@@ -53,7 +47,7 @@ class HeadersWebSocket(web.View):
 
             # Todo: this should actually be 'Accept' but HeaderSV uses 'Content-Type'
             request_headers = {'Content-Type': 'application/octet-stream'}
-            url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{current_best_hash}"
+            url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{current_best_hash}"
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.read()
                 self.logger.debug(f"Sending tip to new websocket connection, ws_id: {client.ws_id}")
@@ -63,17 +57,17 @@ class HeadersWebSocket(web.View):
                 await client.websocket.send_bytes(response)
         except aiohttp.ClientConnectorError as e:
             # When HeaderSV comes back online there will be a compensating chain tip notification
-            self.logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+            self.logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
             pass
 
-    async def _handle_new_connection(self, client: WSClient):
-        self.ws_clients = self.request.app['ws_clients']
+    async def _handle_new_connection(self, client: HeadersWSClient):
+        self.ws_clients = self.request.app['headers_ws_clients']
         await self._send_chain_tip(client)
 
         async for msg in client.websocket:
             # Ignore all messages from client
             if msg.type == aiohttp.WSMsgType.text:
-                self.logger.debug('%s client sent: %s', client.ws_id, msg.data)
+                self.logger.debug('%s new headers websocket client sent: %s', client.ws_id, msg.data)
                 # request_json = json.loads(msg.data)
                 # response_json = json.dumps(request_json)
                 # await client.websocket.send_str(response_json)

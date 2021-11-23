@@ -14,6 +14,11 @@ from typing import Any, Set, List, NamedTuple, Optional, Tuple
 
 from .constants import AccountFlags, ChannelState
 
+"""
+Useful regexes for searching codebase:
+- create.*_table -> finds all table creation functions
+"""
+
 
 class AccountMetadata(NamedTuple):
     # The identity public key for this client.
@@ -58,6 +63,8 @@ class ChannelRow(NamedTuple):
 class DatabaseStateModifiedError(Exception):
     pass
 
+from esv_reference_server.types import ChannelRow, ChannelAPITokenRow
+
 
 class LeakedSQLiteConnectionError(Exception):
     pass
@@ -99,6 +106,7 @@ def max_sql_variables() -> int:
 #   https://github.com/electrumsv/electrumsv/issues/539
 SQLITE_MAX_VARS = max_sql_variables()
 SQLITE_EXPR_TREE_DEPTH = 1000
+
 
 
 class SQLiteDatabase:
@@ -205,10 +213,22 @@ class SQLiteDatabase:
     def create_tables(self):
         self.create_account_table()
         self.create_account_payment_channel_table()
+        self.create_message_box_table()
+        self.create_message_box_api_tokens_table()
 
     def drop_tables(self):
-        self.drop_account_payment_channel_table()
-        self.drop_account_table()
+        result = self.get_tables()
+        queries = []
+        for row in result:
+            table = row[0]
+            queries.append(f"DROP TABLE {table};")
+
+        for query in queries:
+            self.execute(query)
+
+    def get_tables(self):
+        sql = """SELECT name FROM sqlite_schema WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
+        return self.execute(sql)
 
     def reset_tables(self):
         self.drop_tables()
@@ -227,10 +247,6 @@ class SQLiteDatabase:
             api_key                 TEXT DEFAULT NULL
         )
         """
-        self.execute(sql)
-
-    def drop_account_table(self) -> None:
-        sql = "DROP TABLE IF EXISTS accounts"
         self.execute(sql)
 
     def create_account(self, public_key_bytes: bytes) -> Tuple[int, str]:
@@ -265,6 +281,63 @@ class SQLiteDatabase:
         account_flags: AccountFlags
         account_id, account_flags = result[0]
         return account_id, account_flags
+
+    def create_message_box_table(self) -> None:
+        """Modelled very closely on Peer Channels reference implementation:
+        https://github.com/electrumsv/spvchannels-reference"""
+        sql = (
+            """
+            CREATE TABLE IF NOT EXISTS channels (
+                internalid    BIGSERIAL          NOT NULL,
+                account_id    BIGSERIAL          NOT NULL,
+                externalid    VARCHAR(1024)      NOT NULL,
+                publicread    boolean,
+                publicwrite   boolean,
+                locked        boolean,
+                sequenced     boolean,
+                minagedays    INT,
+                maxagedays    INT,
+                autoprune     boolean,
+                
+                PRIMARY KEY (internalid),
+                UNIQUE (externalid),
+                FOREIGN KEY(account_id) REFERENCES accounts(account_id)
+                
+            )"""
+        )
+        self.execute(sql)
+
+    def create_message_box(self, channel_row: ChannelRow):
+        param_placeholders = ','.join(["?" for _ in range(len(channel_row))])
+        sql = f"""INSERT INTO channels VALUES({param_placeholders})"""
+        self.execute(sql, params=channel_row)
+
+    def create_message_box_api_tokens_table(self):
+        """Modelled very closely on Peer Channels reference implementation:
+        https://github.com/electrumsv/spvchannels-reference"""
+        sql = ("""CREATE TABLE api_token (
+              id                    BIGSERIAL          NOT NULL,
+              account_id            BIGINT             NOT NULL,
+              channel_externalid    BIGINT             NOT NULL,
+              token		            VARCHAR(1024),
+              description           VARCHAR(1024),
+              canread               boolean,
+              canwrite              boolean,
+              validfrom             TIMESTAMP          NOT NULL,
+              validto               TIMESTAMP,
+
+              PRIMARY KEY (id),
+              UNIQUE (token),
+              FOREIGN KEY (account_id) REFERENCES accounts (account_id),
+              FOREIGN KEY (channel_externalid) REFERENCES channels (internalid)
+            )
+            """)
+        self.execute(sql)
+
+    def insert_channel_api_token(self, channel_api_token: ChannelAPITokenRow):
+        param_placeholders = ','.join(["?" for _ in range(len(channel_api_token))])
+        sql = f"""INSERT INTO channels VALUES({param_placeholders})"""
+        self.execute(sql, params=channel_api_token)
 
     def get_account_id_for_public_key_bytes(self, public_key_bytes: bytes) \
             -> Tuple[Optional[int], AccountFlags]:
@@ -326,10 +399,6 @@ class SQLiteDatabase:
             FOREIGN KEY(account_id) REFERENCES accounts (account_id)
         )
         """
-        self.execute(sql)
-
-    def drop_account_payment_channel_table(self) -> None:
-        sql = "DROP TABLE IF EXISTS account_payment_channels"
         self.execute(sql)
 
     def create_account_payment_channel(self, account_id: int, payment_key_index: int,
@@ -435,3 +504,9 @@ class SQLiteDatabase:
         cursor = self.execute2(sql, (channel_id,))
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
+
+    def get_max_sequence(self, api_key: str, channelid: str):
+        raise NotImplementedError()
+
+    def get_messages(self, api_key: str, channelid: str, unread: bool):
+        raise NotImplementedError()
