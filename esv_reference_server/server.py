@@ -1,4 +1,3 @@
-import base64
 import time
 from pathlib import Path
 
@@ -13,12 +12,14 @@ import queue
 import threading
 from typing import AsyncIterator, Dict
 
+from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient
 from .constants import Network, SERVER_HOST, SERVER_PORT
 from .handlers_headers_ws import HeadersWebSocket
 
 from .keys import create_regtest_server_keys, ServerKeys
-from . import handlers, handlers_msg_box
+from . import handlers
+from esv_reference_server import msg_box
 from .sqlite_db import SQLiteDatabase
 
 
@@ -52,6 +53,7 @@ class ApplicationState(object):
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(MODULE_DIR.parent / 'esv_reference_server.db')
+        self.msg_box_repository = MsgBoxSQLiteRepository(self.sqlite_db)
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
 
@@ -222,25 +224,25 @@ def get_aiohttp_app(network: Network) -> web.Application:
         web.post("/api/v1/account/funding", handlers.post_account_funding),
 
         # Message Box Management (i.e. Custom Peer Channels implementation)
-        web.get("/api/v1/channel/manage/list", handlers_msg_box.list_channels),
-        web.get("/api/v1/channel/manage/{channelid}", handlers_msg_box.get_single_channel_details),
-        web.post("/api/v1/channel/manage/{channelid}", handlers_msg_box.update_single_channel_properties),
-        web.delete("/api/v1/channel/manage/{channelid}", handlers_msg_box.delete_channel),
-        web.post("/api/v1/channel/manage", handlers_msg_box.create_new_channel),
-        web.get("/api/v1/channel/manage{channelid}/api-token/{tokenid}", handlers_msg_box.get_token_details),
-        web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", handlers_msg_box.revoke_selected_token),
-        web.get("/api/v1/channel/manage/{channelid}/api-token", handlers_msg_box.get_list_of_tokens),
-        web.post("/api/v1/channel/manage/{channelid}/api-token", handlers_msg_box.create_new_token_for_channel),
+        web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels),
+        web.get("/api/v1/channel/manage/{channelid}", msg_box.controller.get_single_channel_details),
+        web.post("/api/v1/channel/manage/{channelid}", msg_box.controller.update_single_channel_properties),
+        web.delete("/api/v1/channel/manage/{channelid}", msg_box.controller.delete_channel),
+        web.post("/api/v1/channel/manage", msg_box.controller.create_new_channel),
+        web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", msg_box.controller.get_token_details),
+        web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", msg_box.controller.revoke_selected_token),
+        web.get("/api/v1/channel/manage/{channelid}/api-token", msg_box.controller.get_list_of_tokens),
+        web.post("/api/v1/channel/manage/{channelid}/api-token", msg_box.controller.create_new_token_for_channel),
 
         # Message Box Push / Pull API
-        web.post("/api/v1/channel/{channelid}", handlers_msg_box.write_message),
+        web.post("/api/v1/channel/{channelid}", msg_box.controller.write_message),
         # web.head is added automatically by web.get in aiohttp
-        web.get("/api/v1/channel/{channelid}", handlers_msg_box.get_messages),
-        web.post("/api/v1/channel/{channelid}/{sequence}", handlers_msg_box.mark_message_read_or_unread),
-        web.delete("/api/v1/channel/{channelid}/{sequence}", handlers_msg_box.delete_message),
+        web.get("/api/v1/channel/{channelid}", msg_box.controller.get_messages, name='get_messages'),
+        web.post("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.mark_message_read_or_unread),
+        web.delete("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.delete_message),
 
         # Message Box Websocket API
-        web.get("/api/v1/channel/{channelid}/notify", handlers_msg_box.subscribe_to_push_notifications),
+        web.get("/api/v1/channel/{channelid}/notify", msg_box.controller.subscribe_to_push_notifications),
     ])
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":

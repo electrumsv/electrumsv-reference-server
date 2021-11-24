@@ -63,8 +63,6 @@ class ChannelRow(NamedTuple):
 class DatabaseStateModifiedError(Exception):
     pass
 
-from esv_reference_server.types import ChannelRow, ChannelAPITokenRow
-
 
 class LeakedSQLiteConnectionError(Exception):
     pass
@@ -108,8 +106,7 @@ SQLITE_MAX_VARS = max_sql_variables()
 SQLITE_EXPR_TREE_DEPTH = 1000
 
 
-
-class SQLiteDatabase:
+class SQLiteDatabaseBase:
     """
     Due to connection pooling, all db operations (methods on this class) should be
     1) thread-safe
@@ -117,14 +114,13 @@ class SQLiteDatabase:
     """
 
     def __init__(self, storage_path: Path = Path('esv_reference_server.db')):
-        self.logger = logging.getLogger("sqlite-database")
+        self.logger = logging.getLogger("sqlite-database-base")
         self.storage_path = storage_path
         self.conn = sqlite3.connect(self.storage_path)
         self._db_path = str(storage_path)
         self._connection_pool: queue.Queue[sqlite3.Connection] = queue.Queue()
         self._active_connections: Set[sqlite3.Connection] = set()
         self.mined_tx_hashes_table_lock = threading.RLock()
-
         if int(os.getenv('REFERENCE_SERVER_RESET', "1")):
             self.reset_tables()
         else:  # create if not exist
@@ -148,7 +144,9 @@ class SQLiteDatabase:
 
     def increase_connection_pool(self) -> None:
         """adds 1 more connection to the pool"""
-        connection = sqlite3.connect(self._db_path, check_same_thread=False)
+        connection = sqlite3.connect(self._db_path, check_same_thread=False,
+            isolation_level=None)
+        connection.isolation_level = None
         self._connection_pool.put(connection)
 
     def decrease_connection_pool(self) -> None:
@@ -177,16 +175,19 @@ class SQLiteDatabase:
     def execute(self, sql: str, params: Optional[tuple]=None) -> List[Any]:
         """Thread-safe"""
         connection = self.acquire_connection()
+        cur = connection.cursor()
         try:
+            cur.execute("BEGIN")
             if not params:
-                cur: sqlite3.Cursor = connection.execute(sql)
+                cur = cur.execute(sql)
             else:
-                cur: sqlite3.Cursor = connection.execute(sql, params)
-            connection.commit()
-            return cur.fetchall()
+                cur = cur.execute(sql, params)
+            result = cur.fetchall()
+            cur.execute("COMMIT")
+            return result
         except Exception:
-            connection.rollback()
-            self.logger.exception(f"An unexpected exception occured for SQL: {sql}")
+            cur.execute("ROLLBACK")
+            self.logger.exception(f"An unexpected exception occurred for SQL: {sql}")
             raise
         finally:
             self.release_connection(connection)
@@ -196,25 +197,24 @@ class SQLiteDatabase:
         This returns the cursor to allow the caller to get rowcount or whatever.
         """
         connection = self.acquire_connection()
+        cur = connection.cursor()
         try:
+            cur.execute("BEGIN")
             if not params:
-                cur: sqlite3.Cursor = connection.execute(sql)
+                cur = cur.execute(sql)
             else:
-                cur: sqlite3.Cursor = connection.execute(sql, params)
-            connection.commit()
+                cur = cur.execute(sql, params)
+            cur.execute("COMMIT")
             return cur
         except Exception:
-            connection.rollback()
-            self.logger.exception(f"An unexpected exception occured for SQL: {sql}")
+            cur.execute("ROLLBACK")
+            self.logger.exception(f"An unexpected exception occurred for SQL: {sql}")
             raise
         finally:
             self.release_connection(connection)
 
     def create_tables(self):
-        self.create_account_table()
-        self.create_account_payment_channel_table()
-        self.create_message_box_table()
-        self.create_message_box_api_tokens_table()
+        raise NotImplementedError()
 
     def drop_tables(self):
         result = self.get_tables()
@@ -233,6 +233,23 @@ class SQLiteDatabase:
     def reset_tables(self):
         self.drop_tables()
         self.create_tables()
+
+
+
+class SQLiteDatabase(SQLiteDatabaseBase):
+    """
+    Due to connection pooling, all db operations (methods on this class) should be
+    1) thread-safe
+    2) low latency due to caching the connections prior to use
+    """
+
+    def __init__(self, storage_path: Path = Path('esv_reference_server.db')):
+        self.logger = logging.getLogger("sqlite-database")
+        super().__init__(storage_path)
+
+    def create_tables(self):
+        self.create_account_table()
+        self.create_account_payment_channel_table()
 
     # SECTION: Accounts
 
@@ -281,63 +298,6 @@ class SQLiteDatabase:
         account_flags: AccountFlags
         account_id, account_flags = result[0]
         return account_id, account_flags
-
-    def create_message_box_table(self) -> None:
-        """Modelled very closely on Peer Channels reference implementation:
-        https://github.com/electrumsv/spvchannels-reference"""
-        sql = (
-            """
-            CREATE TABLE IF NOT EXISTS channels (
-                internalid    BIGSERIAL          NOT NULL,
-                account_id    BIGSERIAL          NOT NULL,
-                externalid    VARCHAR(1024)      NOT NULL,
-                publicread    boolean,
-                publicwrite   boolean,
-                locked        boolean,
-                sequenced     boolean,
-                minagedays    INT,
-                maxagedays    INT,
-                autoprune     boolean,
-                
-                PRIMARY KEY (internalid),
-                UNIQUE (externalid),
-                FOREIGN KEY(account_id) REFERENCES accounts(account_id)
-                
-            )"""
-        )
-        self.execute(sql)
-
-    def create_message_box(self, channel_row: ChannelRow):
-        param_placeholders = ','.join(["?" for _ in range(len(channel_row))])
-        sql = f"""INSERT INTO channels VALUES({param_placeholders})"""
-        self.execute(sql, params=channel_row)
-
-    def create_message_box_api_tokens_table(self):
-        """Modelled very closely on Peer Channels reference implementation:
-        https://github.com/electrumsv/spvchannels-reference"""
-        sql = ("""CREATE TABLE api_token (
-              id                    BIGSERIAL          NOT NULL,
-              account_id            BIGINT             NOT NULL,
-              channel_externalid    BIGINT             NOT NULL,
-              token		            VARCHAR(1024),
-              description           VARCHAR(1024),
-              canread               boolean,
-              canwrite              boolean,
-              validfrom             TIMESTAMP          NOT NULL,
-              validto               TIMESTAMP,
-
-              PRIMARY KEY (id),
-              UNIQUE (token),
-              FOREIGN KEY (account_id) REFERENCES accounts (account_id),
-              FOREIGN KEY (channel_externalid) REFERENCES channels (internalid)
-            )
-            """)
-        self.execute(sql)
-
-    def insert_channel_api_token(self, channel_api_token: ChannelAPITokenRow):
-        param_placeholders = ','.join(["?" for _ in range(len(channel_api_token))])
-        sql = f"""INSERT INTO channels VALUES({param_placeholders})"""
-        self.execute(sql, params=channel_api_token)
 
     def get_account_id_for_public_key_bytes(self, public_key_bytes: bytes) \
             -> Tuple[Optional[int], AccountFlags]:
