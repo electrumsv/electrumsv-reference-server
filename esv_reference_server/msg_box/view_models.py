@@ -119,3 +119,28 @@ class MsgBoxViewModelGet:
             public_write=msg_box.public_write, sequenced=msg_box.sequenced, locked=msg_box.locked,
             head_sequence=msg_box.head_message_sequence, retention=retention,
             api_tokens=api_tokens)
+
+
+@dataclass(slots=True)
+class APITokenViewModelCreate:
+    description: str
+    can_read: bool
+    can_write: bool
+
+
+@dataclass(slots=True)
+class APITokenViewModelGet:
+    id: str
+    token: str
+    description: str
+    can_read: bool
+    can_write: bool
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "token": self.token,
+            "description": self.description,
+            "can_read": bool(self.can_write),
+            "can_write": bool(self.can_read)
+        }
