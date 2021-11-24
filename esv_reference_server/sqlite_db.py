@@ -14,6 +14,11 @@ from typing import Any, Set, List, NamedTuple, Optional, Tuple
 
 from .constants import AccountFlags, ChannelState
 
+"""
+Useful regexes for searching codebase:
+- create.*_table -> finds all table creation functions
+"""
+
 
 class AccountMetadata(NamedTuple):
     # The identity public key for this client.
@@ -101,7 +106,7 @@ SQLITE_MAX_VARS = max_sql_variables()
 SQLITE_EXPR_TREE_DEPTH = 1000
 
 
-class SQLiteDatabase:
+class SQLiteDatabaseBase:
     """
     Due to connection pooling, all db operations (methods on this class) should be
     1) thread-safe
@@ -109,14 +114,13 @@ class SQLiteDatabase:
     """
 
     def __init__(self, storage_path: Path = Path('esv_reference_server.db')):
-        self.logger = logging.getLogger("sqlite-database")
+        self.logger = logging.getLogger("sqlite-database-base")
         self.storage_path = storage_path
         self.conn = sqlite3.connect(self.storage_path)
         self._db_path = str(storage_path)
         self._connection_pool: queue.Queue[sqlite3.Connection] = queue.Queue()
         self._active_connections: Set[sqlite3.Connection] = set()
         self.mined_tx_hashes_table_lock = threading.RLock()
-
         if int(os.getenv('REFERENCE_SERVER_RESET', "1")):
             self.reset_tables()
         else:  # create if not exist
@@ -140,7 +144,9 @@ class SQLiteDatabase:
 
     def increase_connection_pool(self) -> None:
         """adds 1 more connection to the pool"""
-        connection = sqlite3.connect(self._db_path, check_same_thread=False)
+        connection = sqlite3.connect(self._db_path, check_same_thread=False,
+            isolation_level=None)
+        connection.isolation_level = None
         self._connection_pool.put(connection)
 
     def decrease_connection_pool(self) -> None:
@@ -169,16 +175,19 @@ class SQLiteDatabase:
     def execute(self, sql: str, params: Optional[tuple]=None) -> List[Any]:
         """Thread-safe"""
         connection = self.acquire_connection()
+        cur = connection.cursor()
         try:
+            cur.execute("BEGIN")
             if not params:
-                cur: sqlite3.Cursor = connection.execute(sql)
+                cur = cur.execute(sql)
             else:
-                cur: sqlite3.Cursor = connection.execute(sql, params)
-            connection.commit()
-            return cur.fetchall()
+                cur = cur.execute(sql, params)
+            result = cur.fetchall()
+            cur.execute("COMMIT")
+            return result
         except Exception:
-            connection.rollback()
-            self.logger.exception(f"An unexpected exception occured for SQL: {sql}")
+            cur.execute("ROLLBACK")
+            self.logger.exception(f"An unexpected exception occurred for SQL: {sql}")
             raise
         finally:
             self.release_connection(connection)
@@ -188,31 +197,59 @@ class SQLiteDatabase:
         This returns the cursor to allow the caller to get rowcount or whatever.
         """
         connection = self.acquire_connection()
+        cur = connection.cursor()
         try:
+            cur.execute("BEGIN")
             if not params:
-                cur: sqlite3.Cursor = connection.execute(sql)
+                cur = cur.execute(sql)
             else:
-                cur: sqlite3.Cursor = connection.execute(sql, params)
-            connection.commit()
+                cur = cur.execute(sql, params)
+            cur.execute("COMMIT")
             return cur
         except Exception:
-            connection.rollback()
-            self.logger.exception(f"An unexpected exception occured for SQL: {sql}")
+            cur.execute("ROLLBACK")
+            self.logger.exception(f"An unexpected exception occurred for SQL: {sql}")
             raise
         finally:
             self.release_connection(connection)
 
     def create_tables(self):
-        self.create_account_table()
-        self.create_account_payment_channel_table()
+        raise NotImplementedError()
 
     def drop_tables(self):
-        self.drop_account_payment_channel_table()
-        self.drop_account_table()
+        result = self.get_tables()
+        queries = []
+        for row in result:
+            table = row[0]
+            queries.append(f"DROP TABLE {table};")
+
+        for query in queries:
+            self.execute(query)
+
+    def get_tables(self):
+        sql = """SELECT name FROM sqlite_schema WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
+        return self.execute(sql)
 
     def reset_tables(self):
         self.drop_tables()
         self.create_tables()
+
+
+
+class SQLiteDatabase(SQLiteDatabaseBase):
+    """
+    Due to connection pooling, all db operations (methods on this class) should be
+    1) thread-safe
+    2) low latency due to caching the connections prior to use
+    """
+
+    def __init__(self, storage_path: Path = Path('esv_reference_server.db')):
+        self.logger = logging.getLogger("sqlite-database")
+        super().__init__(storage_path)
+
+    def create_tables(self):
+        self.create_account_table()
+        self.create_account_payment_channel_table()
 
     # SECTION: Accounts
 
@@ -227,10 +264,6 @@ class SQLiteDatabase:
             api_key                 TEXT DEFAULT NULL
         )
         """
-        self.execute(sql)
-
-    def drop_account_table(self) -> None:
-        sql = "DROP TABLE IF EXISTS accounts"
         self.execute(sql)
 
     def create_account(self, public_key_bytes: bytes) -> Tuple[int, str]:
@@ -326,10 +359,6 @@ class SQLiteDatabase:
             FOREIGN KEY(account_id) REFERENCES accounts (account_id)
         )
         """
-        self.execute(sql)
-
-    def drop_account_payment_channel_table(self) -> None:
-        sql = "DROP TABLE IF EXISTS account_payment_channels"
         self.execute(sql)
 
     def create_account_payment_channel(self, account_id: int, payment_key_index: int,
@@ -435,3 +464,9 @@ class SQLiteDatabase:
         cursor = self.execute2(sql, (channel_id,))
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
+
+    def get_max_sequence(self, api_key: str, channelid: str):
+        raise NotImplementedError()
+
+    def get_messages(self, api_key: str, channelid: str, unread: bool):
+        raise NotImplementedError()

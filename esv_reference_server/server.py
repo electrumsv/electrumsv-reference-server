@@ -12,10 +12,14 @@ import queue
 import threading
 from typing import AsyncIterator, Dict
 
+from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
+from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient
 from .constants import Network, SERVER_HOST, SERVER_PORT
-from .handlers_ws import HeadersWebSocket, WSClient
+from .handlers_headers_ws import HeadersWebSocket
+
 from .keys import create_regtest_server_keys, ServerKeys
 from . import handlers
+from esv_reference_server import msg_box
 from .sqlite_db import SQLiteDatabase
 
 
@@ -39,38 +43,44 @@ class ApplicationState(object):
         self.app = app
         self.loop = loop
 
-        self.ws_clients: Dict[str, WSClient] = {}
-        self.ws_clients_lock: threading.RLock = threading.RLock()
-        self.ws_queue: queue.Queue[str] = queue.Queue()  # json only
+        self.headers_ws_clients: Dict[str, HeadersWSClient] = {}
+        self.headers_ws_clients_lock: threading.RLock = threading.RLock()
+        self.headers_ws_queue: queue.Queue[str] = queue.Queue()  # json only
+
+        self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
+        self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
+        self.msg_box_new_msg_queue = queue.Queue()  # json only
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(MODULE_DIR.parent / 'esv_reference_server.db')
+        self.msg_box_repository = MsgBoxSQLiteRepository(self.sqlite_db)
+
+        self.header_sv_url = os.getenv('HEADER_SV_URL')
 
     def start_threads(self):
         threading.Thread(target=self.header_notifications_thread, daemon=True).start()
 
-    def get_ws_clients(self) -> Dict[str, WSClient]:
-        with self.ws_clients_lock:
-            return self.ws_clients
+    # Headers Websocket Client Get/Add/Remove & Notify thread
+    def get_ws_clients(self) -> Dict[str, HeadersWSClient]:
+        with self.headers_ws_clients_lock:
+            return self.headers_ws_clients
 
-    def add_ws_client(self, ws_client: WSClient):
-        with self.ws_clients_lock:
-            self.ws_clients[ws_client.ws_id] = ws_client
+    def add_ws_client(self, ws_client: HeadersWSClient):
+        with self.headers_ws_clients_lock:
+            self.headers_ws_clients[ws_client.ws_id] = ws_client
 
-    def remove_ws_client(self, ws_client: WSClient) -> None:
-        with self.ws_clients_lock:
-            del self.ws_clients[ws_client.ws_id]
+    def remove_ws_client(self, ws_client: HeadersWSClient) -> None:
+        with self.headers_ws_clients_lock:
+            del self.headers_ws_clients[ws_client.ws_id]
 
     def header_notifications_thread(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
-            HEADER_SV_HOST = os.getenv('HEADER_SV_HOST')
-            HEADER_SV_PORT = os.getenv('HEADER_SV_PORT')
             current_best_hash = ""
 
             while self.app.is_alive:
                 try:
-                    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/tips"
+                    url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
                     result = requests.get(url_to_fetch, request_headers)
                     result.raise_for_status()
@@ -87,7 +97,7 @@ class ApplicationState(object):
                         time.sleep(2)
                         continue
                 except requests.exceptions.ConnectionError as e:
-                    logger.error(f"HeaderSV service is unavailable on http://{HEADER_SV_HOST}:{HEADER_SV_PORT}")
+                    logger.error(f"HeaderSV service is unavailable on {self.header_sv_url}")
                     # Any new websocket connections will be notified when HeaderSV is back online
                     current_best_hash = ""
                     continue
@@ -101,7 +111,7 @@ class ApplicationState(object):
                 # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client in self.get_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    url_to_fetch = f"http://{HEADER_SV_HOST}:{HEADER_SV_PORT}/api/v1/chain/header/{current_best_hash}"
+                    url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
 
                     # Todo: this should actually be 'Accept' but HeaderSV uses 'Content-Type'
                     request_headers = {'Content-Type': 'application/octet-stream'}
@@ -112,6 +122,48 @@ class ApplicationState(object):
                     response += result.content  # 80 byte header
                     response += bitcoinx.pack_be_uint32(current_best_height)
                     asyncio.run_coroutine_threadsafe(ws_client.websocket.send_bytes(response),
+                        self.loop)
+        except Exception:
+            self.logger.exception("unexpected exception in header_notifications_thread")
+        finally:
+            self.logger.info("Closing push notifications thread")
+
+    # Message Box Websocket Client Get/Add/Remove & Notify thread
+    def get_msg_box_ws_clients(self) -> Dict[str, MsgBoxWSClient]:
+        with self.msg_box_ws_clients_lock:
+            return self.msg_box_ws_clients
+
+    def add_msg_box_ws_client(self, ws_client: MsgBoxWSClient):
+        with self.msg_box_ws_clients_lock:
+            self.msg_box_ws_clients[ws_client.ws_id] = ws_client
+
+    def remove_msg_box_ws_client(self, ws_client: MsgBoxWSClient) -> None:
+        with self.msg_box_ws_clients_lock:
+            del self.msg_box_ws_clients[ws_client.ws_id]
+
+    def message_box_notifications_thread(self) -> None:
+        """Emits any notifications from the queue to all connected websockets"""
+        try:
+            while self.app.is_alive:
+                try:
+                    # Todo push new messages to Queue
+                    self.msg_box_new_msg_queue.get()
+                except Exception as e:
+                    logger.exception(e)
+                    continue
+
+                if not len(self.get_msg_box_ws_clients()):
+                    continue
+
+                # Todo Send new tip notification to the relevant websocket client
+                #  (based on channel_id)
+                for ws_id, ws_client in self.get_msg_box_ws_clients().items():
+                    self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
+
+                    # Todo - add standardised Peer Channel Format notification message here
+                    response = {}
+
+                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_json(response),
                         self.loop)
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
@@ -154,19 +206,43 @@ def get_aiohttp_app(network: Network) -> web.Application:
 
     # This is the standard aiohttp way of managing state within the handlers
     app['app_state'] = app_state
-    app['ws_clients'] = app_state.ws_clients
+    app['headers_ws_clients'] = app_state.headers_ws_clients
+    app['headers_ws_clients'] = app_state.msg_box_ws_clients
 
     # Non-optional APIs
     app.add_routes([
         web.get("/", handlers.ping),
         web.get("/error", handlers.error),
         web.get("/api/v1/endpoints", handlers.get_endpoints_data),
+
+        # Payment Channel Account Management
         web.get("/api/v1/account", handlers.get_account),
         web.post("/api/v1/account/key", handlers.post_account_key),
         web.post("/api/v1/account/channel", handlers.post_account_channel),
         web.put("/api/v1/account/channel", handlers.put_account_channel_update),
         web.delete("/api/v1/account/channel", handlers.delete_account_channel),
         web.post("/api/v1/account/funding", handlers.post_account_funding),
+
+        # Message Box Management (i.e. Custom Peer Channels implementation)
+        web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels),
+        web.get("/api/v1/channel/manage/{channelid}", msg_box.controller.get_single_channel_details),
+        web.post("/api/v1/channel/manage/{channelid}", msg_box.controller.update_single_channel_properties),
+        web.delete("/api/v1/channel/manage/{channelid}", msg_box.controller.delete_channel),
+        web.post("/api/v1/channel/manage", msg_box.controller.create_new_channel),
+        web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", msg_box.controller.get_token_details),
+        web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", msg_box.controller.revoke_selected_token),
+        web.get("/api/v1/channel/manage/{channelid}/api-token", msg_box.controller.get_list_of_tokens),
+        web.post("/api/v1/channel/manage/{channelid}/api-token", msg_box.controller.create_new_token_for_channel),
+
+        # Message Box Push / Pull API
+        web.post("/api/v1/channel/{channelid}", msg_box.controller.write_message),
+        # web.head is added automatically by web.get in aiohttp
+        web.get("/api/v1/channel/{channelid}", msg_box.controller.get_messages, name='get_messages'),
+        web.post("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.mark_message_read_or_unread),
+        web.delete("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.delete_message),
+
+        # Message Box Websocket API
+        web.get("/api/v1/channel/{channelid}/notify", msg_box.controller.subscribe_to_push_notifications),
     ])
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
@@ -176,9 +252,6 @@ def get_aiohttp_app(network: Network) -> web.Application:
             web.get("/api/v1/chain/tips", handlers.get_chain_tips),
             web.view("/api/v1/headers/websocket", HeadersWebSocket),
         ])
-
-    if os.getenv("EXPOSE_PEER_CHANNEL_APIS") == "1":
-        pass  # TBD
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
         pass  # TBD
