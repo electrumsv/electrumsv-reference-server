@@ -10,7 +10,7 @@ from esv_reference_server import errors
 from esv_reference_server.msg_box.models import MsgBox
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.msg_box.view_models import RetentionViewModel, MsgBoxViewModelGet, \
-    MsgBoxViewModelCreate, MsgBoxViewModelAmend
+    MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
 
 if TYPE_CHECKING:
     from esv_reference_server.server import ApplicationState
@@ -69,7 +69,10 @@ async def list_channels(request: web.Request) -> web.Response:
     if not _auth_ok(api_key, db):
         raise web.HTTPUnauthorized
 
-    account_id = 0  # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - check the account_id against the channel_id to ensure this user
+    #  has the required read/write permissions
+    account_id = 0
     logger.info(f"Get list of message boxes for accountid: {account_id}.")
 
     msg_boxes: list[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
@@ -93,8 +96,11 @@ async def get_single_channel_details(request: web.Request) -> web.Response:
     if not _auth_ok(api_key, db):
         raise web.HTTPUnauthorized
 
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - check the account_id against the channel_id to ensure this user
+    #  has the required read/write permissions
+    account_id = 0
     external_id = request.match_info.get('channelid')
-    account_id = 0  # Todo - get the account_id from db and return HTTPNotFound if not found
 
     logger.info(f"Get message box by external_id {external_id} for account(id) {account_id}.")
     msg_box: MsgBox = msg_box_repository.get_msg_box(account_id, external_id)
@@ -118,8 +124,11 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
         if not _auth_ok(api_key, db):
             raise web.HTTPUnauthorized
 
+        # Todo - get the account_id from db and return HTTPNotFound if not found
+        # Todo - check the account_id against the channel_id to ensure this user
+        #  has the required read/write permissions
+        account_id = 0
         external_id = request.match_info.get('channelid')
-        account_id = 0  # Todo - get the account_id from db and return HTTPNotFound if not found
         body = await request.json()
         msg_box_view_amend = MsgBoxViewModelAmend(**body)
 
@@ -147,8 +156,11 @@ async def delete_channel(request: web.Request) -> web.Response:
     if not _auth_ok(api_key, db):
         raise web.HTTPUnauthorized
 
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - check the account_id against the channel_id to ensure this user
+    #  has the required read/write permissions
+    account_id = 0
     external_id = request.match_info.get('channelid')
-    account_id = 0  # Todo - get the account_id from db and return HTTPNotFound if not found
 
     logger.info(f"Deleting message box by external_id {external_id} for account(id) {account_id}.")
     msg_box_view_delete: MsgBoxViewModelAmend = msg_box_repository.delete_msg_box(external_id)
@@ -170,7 +182,10 @@ async def create_new_channel(request: web.Request) -> web.Response:
         if not _auth_ok(api_key, db):
             raise web.HTTPUnauthorized
 
-        account_id = 0  # Todo - get the account_id from db and return HTTPNotFound if not found
+        # Todo - get the account_id from db and return HTTPNotFound if not found
+        # Todo - check the account_id against the channel_id to ensure this user
+        #  has the required read/write permissions
+        account_id = 0
 
         logger.info(f"Creating new message box for account_id: {account_id}.")
         body = await request.json()
@@ -190,20 +205,111 @@ async def create_new_channel(request: web.Request) -> web.Response:
         return web.Response(reason="JSONDecodeError: " + str(e), status=400)
 
 
-async def get_token_details(request: web.Request) -> web.Response:
-    return web.HTTPNotImplemented()
-
-
 async def revoke_selected_token(request: web.Request) -> web.Response:
-    return web.HTTPNotImplemented()
+    app_state: ApplicationState = request.app['app_state']
+    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
+    db: SQLiteDatabase = app_state.sqlite_db
+
+    api_key = _try_read_bearer_token(request)
+    if not api_key:
+        return web.Response(reason=errors.NoBearerToken.reason, status=errors.NoBearerToken.status)
+
+    if not _auth_ok(api_key, db):
+        raise web.HTTPUnauthorized
+
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - check the account_id against the channel_id to ensure this user
+    #  has the required read/write permissions
+    account_id = 0
+    _external_id = request.match_info.get('channelid')
+    token_id = request.match_info.get('tokenid')
+
+    msg_box_repository.delete_api_token(token_id)
+    return web.HTTPNoContent()
+
+
+async def get_token_details(request: web.Request) -> web.Response:
+    app_state: ApplicationState = request.app['app_state']
+    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
+    db: SQLiteDatabase = app_state.sqlite_db
+
+    api_key = _try_read_bearer_token(request)
+    if not api_key:
+        return web.Response(reason=errors.NoBearerToken.reason, status=errors.NoBearerToken.status)
+
+    if not _auth_ok(api_key, db):
+        raise web.HTTPUnauthorized
+
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - check the account_id against the channel_id to ensure this user
+    #  has the required read/write permissions
+    account_id = 0
+    _external_id = request.match_info.get('channelid')
+    token_id = request.match_info.get('tokenid')
+
+    api_token_view_model_get = msg_box_repository.get_api_token(token_id)
+    if not api_token_view_model_get:
+        raise web.HTTPNotFound
+    return web.json_response(api_token_view_model_get.to_dict())
 
 
 async def get_list_of_tokens(request: web.Request) -> web.Response:
-    return web.HTTPNotImplemented()
+    app_state: ApplicationState = request.app['app_state']
+    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
+    db: SQLiteDatabase = app_state.sqlite_db
+
+    api_key = _try_read_bearer_token(request)
+    if not api_key:
+        return web.Response(reason=errors.NoBearerToken.reason, status=errors.NoBearerToken.status)
+
+    if not _auth_ok(api_key, db):
+        raise web.HTTPUnauthorized
+
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    # Todo - check the account_id against the channel_id to ensure this user
+    #  has the required read/write permissions
+    account_id = 0
+    external_id = request.match_info.get('channelid')
+    token = request.query.get('token')
+
+    list_api_token_view_model_get = msg_box_repository.get_api_tokens(external_id, token)
+    if not list_api_token_view_model_get:
+        raise web.HTTPNotFound
+    return web.json_response(list_api_token_view_model_get)
 
 
 async def create_new_token_for_channel(request: web.Request) -> web.Response:
-    return web.HTTPNotImplemented()
+    try:
+        app_state: ApplicationState = request.app['app_state']
+        msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
+        db: SQLiteDatabase = app_state.sqlite_db
+
+        api_key = _try_read_bearer_token(request)
+        if not api_key:
+            return web.Response(reason=errors.NoBearerToken.reason, status=errors.NoBearerToken.status)
+
+        if not _auth_ok(api_key, db):
+            raise web.HTTPUnauthorized
+
+        # Todo - get the account_id from db and return HTTPNotFound if not found
+        # Todo - check the account_id against the channel_id to ensure this user
+        #  has the required read/write permissions
+        account_id = 0
+        external_id = request.match_info.get('channelid')
+
+        msg_box = msg_box_repository.get_msg_box(account_id, external_id)
+        if not msg_box:
+            raise web.HTTPNotFound
+
+        body = await request.json()
+        api_token_view_model_create = APITokenViewModelCreate(**body)
+        api_token_view_model_get = msg_box_repository.create_api_token(api_token_view_model_create,
+            msg_box.id, account_id)
+        return web.json_response(api_token_view_model_get.to_dict())
+
+    except JSONDecodeError as e:
+        logger.exception(e)
+        return web.Response(reason="JSONDecodeError: " + str(e), status=400)
 
 
 # ----- MESSAGE MANAGEMENT APIs ----- #

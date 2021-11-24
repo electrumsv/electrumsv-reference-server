@@ -6,6 +6,7 @@ from datetime import datetime
 
 from esv_reference_server.msg_box import models, view_models, utils
 from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken
+from esv_reference_server.msg_box.view_models import APITokenViewModelGet
 
 if typing.TYPE_CHECKING:
     from esv_reference_server.sqlite_db import SQLiteDatabase
@@ -199,9 +200,9 @@ class MsgBoxSQLiteRepository:
 
     def get_msg_box_tokens(self, msg_box_id: int) -> list[MsgBoxAPIToken]:
         sql = f"""SELECT * FROM msg_box_api_token WHERE msg_box_id = ?;"""
-        cur = self.db.execute2(sql, params=(msg_box_id,))
+        rows = self.db.execute(sql, params=(msg_box_id,))
         msg_box_api_tokens = []
-        for row in cur.fetchall():
+        for row in rows:
             row: models.MsgBoxAPITokenRow
             id, account_id, msg_box_externalid, token, description, canread, canwrite, validfrom, validto = row
             msg_api_token = MsgBoxAPIToken(id=id, account_id=account_id, msg_box_id=msg_box_id,
@@ -217,12 +218,11 @@ class MsgBoxSQLiteRepository:
             FROM msg_box
             WHERE account_id = @account_id AND externalid = @externalid;
         """
-        cur = self.db.execute2(sql, params=(account_id, externalid))
-        row = cur.fetchone()
-        if not row:
+        rows = self.db.execute(sql, params=(account_id, externalid))
+        if len(rows) == 0:
             return
 
-        id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, maxagedays, autoprune, head_message_sequence = row
+        id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, maxagedays, autoprune, head_message_sequence = rows[0]
         msg_box_api_tokens = self.get_msg_box_tokens(id)
         head_message_sequence = head_message_sequence if head_message_sequence else 0
 
@@ -241,10 +241,10 @@ class MsgBoxSQLiteRepository:
             FROM msg_box
             WHERE account_id = @account_id;
         """
-        cur = self.db.execute2(sql, params=(account_id,))
+        rows = self.db.execute(sql, params=(account_id,))
 
         msg_boxes = []
-        for row in cur.fetchall():
+        for row in rows:
             id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, maxagedays, autoprune, head_message_sequence = row
             msg_box_api_tokens = self.get_msg_box_tokens(id)
             head_message_sequence = head_message_sequence if head_message_sequence else 0
@@ -293,3 +293,58 @@ class MsgBoxSQLiteRepository:
             raise
         finally:
             self.db.release_connection(connection)
+
+    def create_api_token(self, api_token_view_model_create: view_models.APITokenViewModelCreate,
+            msg_box_id: int, account_id: int) -> APITokenViewModelGet:
+        token = utils.create_channel_api_token()
+
+        sql = """
+            INSERT INTO msg_box_api_token (account_id, msg_box_id, token, description, canread, canwrite, validfrom)
+            VALUES(@account_id, @msg_box_id, @token, @description, @canread, @canwrite, @validfrom)
+            RETURNING *;
+        """
+        params = (account_id, msg_box_id, token,
+            api_token_view_model_create.description,
+            api_token_view_model_create.can_read,
+            api_token_view_model_create.can_write,
+            datetime.utcnow()
+        )
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
+            return APITokenViewModelGet(id=id, token=token, description=description, can_read=canread, can_write=canwrite)
+
+    def get_api_token(self, token_id: int) -> APITokenViewModelGet:
+        sql = "SELECT * FROM msg_box_api_token " \
+              "WHERE id = @token_id and (validto IS NULL OR validto >= @validto);"
+        params = (token_id, datetime.utcnow())
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
+            return APITokenViewModelGet(id=id, token=token, description=description,
+                can_read=canread, can_write=canwrite)
+
+    def get_api_tokens(self, external_id: str, token: Optional[str]) \
+            -> Optional[list[APITokenViewModelGet]]:
+        sql = """
+        SELECT msg_box_api_token.*
+        FROM msg_box_api_token
+        INNER JOIN msg_box ON msg_box_api_token.msg_box_id = msg_box.id
+        WHERE msg_box.externalid = @external_id
+          AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto) and (@token IS NULL or msg_box_api_token.token = @token);
+        """
+        params = (external_id, datetime.utcnow(), token)
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            result = []
+            for row in rows:
+                id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = row
+                view = APITokenViewModelGet(id=id, token=token, description=description, can_read=canread, can_write=canwrite)
+                result.append(view.to_dict())
+            return result
+
+    def delete_api_token(self, token_id):
+        sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
+        params = (datetime.utcnow(), token_id)
+        result = self.db.execute(sql, params)
+        return result

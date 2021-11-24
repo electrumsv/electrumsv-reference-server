@@ -58,7 +58,9 @@ class ApplicationState(object):
         self.header_sv_url = os.getenv('HEADER_SV_URL')
 
     def start_threads(self):
-        threading.Thread(target=self.header_notifications_thread, daemon=True).start()
+        threading.Thread(target=self.message_box_notifications_thread, daemon=True).start()
+        if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
+            threading.Thread(target=self.header_notifications_thread, daemon=True).start()
 
     # Headers Websocket Client Get/Add/Remove & Notify thread
     def get_ws_clients(self) -> Dict[str, HeadersWSClient]:
