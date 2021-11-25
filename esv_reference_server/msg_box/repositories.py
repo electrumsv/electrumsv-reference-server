@@ -1,11 +1,13 @@
 import logging
 import sqlite3
 import typing
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime
 
+from esv_reference_server import errors
+from esv_reference_server.errors import Error
 from esv_reference_server.msg_box import models, view_models, utils
-from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken
+from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken, Message, MessageMetadata
 from esv_reference_server.msg_box.view_models import APITokenViewModelGet
 
 if typing.TYPE_CHECKING:
@@ -18,7 +20,7 @@ if typing.TYPE_CHECKING:
 class MsgBoxSQLiteRepository:
 
     def __init__(self, sqlite: 'SQLiteDatabase'):
-        self.logger = logging.getLogger("msg-box-sqlite-repository")
+        self.logger = logging.getLogger("msg-box-sqlite-db")
         self.db = sqlite
         self.create_tables()
 
@@ -76,14 +78,13 @@ class MsgBoxSQLiteRepository:
         https://github.com/electrumsv/spvchannels-reference"""
         sql = (f"""
             CREATE TABLE IF NOT EXISTS message_status (
-                id            BIGSERIAL          NOT NULL,
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id    BIGINT             NOT NULL,
                 token_id      BIGINT             NOT NULL,
 
                 isread        boolean            NOT NULL,
                 isdeleted     boolean            NOT NULL,
                 
-                PRIMARY KEY (id),
                 FOREIGN KEY (message_id) REFERENCES message (id),
                 FOREIGN KEY (token_id) REFERENCES msg_box_api_token (id)
             )""")
@@ -314,7 +315,7 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description, can_read=canread, can_write=canwrite)
 
-    def get_api_token(self, token_id: int) -> APITokenViewModelGet:
+    def get_api_token_by_id(self, token_id: int) -> APITokenViewModelGet:
         sql = "SELECT * FROM msg_box_api_token " \
               "WHERE id = @token_id and (validto IS NULL OR validto >= @validto);"
         params = (token_id, datetime.utcnow())
@@ -323,6 +324,16 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
                 can_read=canread, can_write=canwrite)
+
+    # Todo - Add an LRU cache for this request
+    def get_api_token(self, token: str) -> MsgBoxAPIToken:
+        sql = "SELECT * FROM msg_box_api_token " \
+              "WHERE token = @token and (validto IS NULL OR validto >= @validto);"
+        params = (token, datetime.utcnow())
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
+            return MsgBoxAPIToken(id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto)
 
     def get_api_tokens(self, external_id: str, token: Optional[str]) \
             -> Optional[list[APITokenViewModelGet]]:
@@ -348,3 +359,279 @@ class MsgBoxSQLiteRepository:
         params = (datetime.utcnow(), token_id)
         result = self.db.execute(sql, params)
         return result
+
+    def is_authorized_to_msg_box_api_token(self, externalid: str, token_id: int):
+        sql = """
+            SELECT COUNT('x') FROM msg_box_api_token
+            INNER JOIN msg_box ON msg_box_api_token.msg_box_id = msg_box.id
+            WHERE msg_box.externalid = @externalid and msg_box_api_token.id = @token_id
+        """
+        params = (externalid, token_id)
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            result = rows[0][0]
+            if result == 0:
+                return False
+            return True
+
+    def write_message(self, message) -> Union[tuple[int, view_models.MessageViewModelGet], Error]:
+        """Returns an error code and error reason"""
+        connection = self.db.acquire_connection()
+        cur: sqlite3.Cursor = connection.cursor()
+        cur.execute('BEGIN')
+        sql = None
+        try:
+            # Translating this query from postgres -> SQLite
+            # The "FOR UPDATE" lock can be dropped because SQLite does broad-brush/global db locking
+            # For the entire transaction
+            sql ="""
+                SELECT locked, sequenced
+                FROM msg_box
+                WHERE id = @msg_box_id
+                -- FOR UPDATE;
+            """
+            params = (message.msg_box_id, )
+            rows = cur.execute(sql, params).fetchall()
+            if len(rows) != 0:
+                locked, sequenced = rows[0]
+                if locked:
+                    error_code = errors.ChannelLocked.status
+                    error_reason = errors.ChannelLocked.reason
+                    raise Error(reason=error_reason, status=error_code)
+
+                if sequenced:
+                    unreadCount = self.get_unread_messages_count(cur, message.msg_box_api_token_id)
+                    if unreadCount > 0:
+                        error_code = errors.SequencingFailure.status
+                        error_reason = errors.SequencingFailure.reason
+                        raise Error(reason=error_reason, status=error_code)
+
+            sql = """
+                INSERT INTO message (fromtoken, msg_box_id, seq, receivedts, contenttype, payload)
+                SELECT @fromtoken, @msg_box_id, COALESCE(MAX(seq) + 1, 1) AS seq, @receivedts, @contenttype, @payload
+                FROM message
+                WHERE msg_box_id = @msg_box_id
+                RETURNING * ;
+            """
+            params = (message.msg_box_api_token_id, message.msg_box_id, message.received_ts,
+                message.content_type, message.payload)
+            rows = cur.execute(sql, params).fetchall()
+            if len(rows) != 0:
+                message_id, fromtoken, msg_box_id, seq, receivedts, contenttype, payload = rows[0]
+                message_view_model_get = view_models.MessageViewModelGet(sequence=seq,
+                    received=datetime.fromisoformat(receivedts),
+                    content_type=contenttype, payload=payload)
+                self.logger.debug(f"Wrote message sequence: {seq} for msg_box_id: {msg_box_id}")
+            else:
+                raise Error(reason="Failed to insert message", status=500)
+
+            sql = """
+                INSERT INTO message_status 
+                    (message_id, token_id, isread, isdeleted)
+                SELECT @messageid, msg_box_api_token.id,
+                       CASE 
+                            WHEN msg_box_api_token.id = @fromtoken 
+                            THEN TRUE 
+                            ELSE FALSE 
+                        END AS isread,
+                        FALSE AS isdeleted
+                FROM msg_box_api_token
+                WHERE validto IS NULL AND msg_box_id = @msg_box_id
+            """
+            params = (message_id, fromtoken, msg_box_id)
+            cur.execute(sql, params)
+            cur.execute("COMMIT")
+            return message_id, message_view_model_get
+        except Exception as error:
+            cur.execute("ROLLBACK")
+            if sql:
+                self.logger.exception(f"An unexpected exception occurred for SQL: {sql}")
+            else:
+                self.logger.exception(f"An unexpected exception occurred")
+            raise error
+        finally:
+            self.db.release_connection(connection)
+
+    def get_unread_messages_count(self, cursor: sqlite3.Cursor, msg_box_api_token_id) -> int:
+        sql = """
+            SELECT Count(*)
+            FROM message_status
+            WHERE message_status.token_id = @tokenid
+              AND message_status.isread = FALSE
+              AND message_status.isdeleted = FALSE
+        """
+        params = (msg_box_api_token_id, )
+        rows = cursor.execute(sql, params).fetchall()
+        count = None
+        if len(rows) != 0:
+            count = rows[0][0]
+        return count if count else 0
+
+    def get_max_sequence(self, api_key: str, external_id: str):
+        sql = """
+            SELECT MAX(message.seq) AS max_sequence
+            FROM message
+            INNER JOIN msg_box ON msg_box.id = message.msg_box_id
+            WHERE msg_box.externalid = @external_id
+                AND msg_box.sequenced = true
+                AND EXISTS(
+                    SELECT 'x'
+                    FROM msg_box_api_token
+                    WHERE msg_box_api_token.token = @token
+                        AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto)
+                        AND NOT msg_box_api_token.id = message.fromtoken
+                )
+                AND EXISTS(
+                    SELECT 'x'
+                    FROM message_status
+                    WHERE message_status.message_id = message.id AND NOT message_status.isdeleted
+                );
+        """
+        params = (external_id, api_key, datetime.utcnow())
+        rows = self.db.execute(sql, params)
+        seq = None
+        if len(rows) != 0:
+            seq = rows[0][0]
+        return seq if seq else 0
+
+    def get_messages(self, api_token_id: int, onlyunread: bool) \
+            -> Optional[tuple[list[view_models.MessageViewModelGet], int]]:
+        connection = self.db.acquire_connection()
+        cur: sqlite3.Cursor = connection.cursor()
+        cur.execute('BEGIN')
+        sql = None
+        try:
+
+            sql = """
+                SELECT msg_box.sequenced
+                FROM msg_box
+                INNER JOIN msg_box_api_token ON msg_box_api_token.msg_box_id = msg_box.id 
+                WHERE msg_box_api_token.id = @tokenid 
+                -- FOR UPDATE  # not needed for SQLite
+            """
+            params = (api_token_id, )
+            rows = cur.execute(sql, params).fetchall()
+            if len(rows) != 0:
+                sequenced = rows[0][0]
+            else:
+                return
+
+            if sequenced:
+                sql = """
+                    SELECT MAX(message.seq) AS max_sequence
+                    FROM message
+                    INNER JOIN message_status ON message_status.message_id = message.id
+                    WHERE message_status.token_id = @tokenid AND NOT message_status.isdeleted;
+                """
+                params = (api_token_id,)
+                rows = cur.execute(sql, params).fetchall()
+                if len(rows) != 0:
+                    max_seq = rows[0][0]
+                    if max_seq is None:
+                        max_seq = 0
+                else:
+                    max_seq = ""
+            else:
+                return
+
+            sql = """
+                SELECT message.*
+                FROM message
+                INNER JOIN message_status ON message_status.message_id = message.id
+                INNER JOIN msg_box_api_token ON message_status.token_id = msg_box_api_token.id
+                WHERE msg_box_api_token.id = @tokenid
+                    AND message_status.isdeleted = false
+                    AND (message_status.isread = false OR @onlyunread = false)
+                ORDER BY message.seq;
+            """
+            params = (api_token_id, onlyunread)
+            rows = cur.execute(sql, params).fetchall()
+            cur.execute("COMMIT")
+
+            messages = []
+            if len(rows) != 0:
+                for row in rows:
+                    id, fromtoken, msg_box_id, seq, receivedts, contenttype, payload = row
+
+                    sequence: int
+                    received: datetime
+                    content_type: str
+                    payload: bytes
+
+                    message = view_models.MessageViewModelGet(
+                        sequence=seq,
+                        received=datetime.fromisoformat(receivedts),
+                        content_type=contenttype,
+                        payload=payload,
+                    )
+                    messages.append(message.to_dict())
+            return messages, max_seq
+        except Exception:
+            cur.execute("ROLLBACK")
+            if sql:
+                self.logger.exception(f"An unexpected exception occurred for SQL: {sql}")
+            else:
+                self.logger.exception(f"An unexpected exception occurred")
+            raise
+        finally:
+            self.db.release_connection(connection)
+
+    def sequence_exists(self, token_id: int, sequence: int) -> bool:
+        sql = """
+            SELECT COUNT(message.seq) AS seq_count
+            FROM message
+            INNER JOIN message_status ON message_status.message_id = message.id
+            WHERE message_status.token_id = @token_id
+              AND message.seq = @seq;
+        """
+        params = (token_id, sequence)
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            sequence_count = rows[0][0]
+            return sequence_count == 1
+        return False
+
+    def mark_messages(self, external_id: str, token_id: int, sequence: int, mark_older: bool,
+            set_read_to: bool) -> Optional[int]:
+        sql = """
+            UPDATE message_status SET isread = @isread
+            WHERE message_status.message_id IN (
+                SELECT message.id
+                FROM message
+                INNER JOIN msg_box ON message.msg_box_id = msg_box.id
+                WHERE msg_box.externalid = @external_id
+                AND (message.seq = @seq OR (message.seq < @seq AND @mark_older = true))
+            )
+            AND message_status.token_id = @token_id
+        """
+        params = (set_read_to, external_id, sequence, mark_older, token_id)
+        self.db.execute2(sql, params)
+
+    def get_message_metadata(self, external_id: str, sequence: int) -> Optional[MessageMetadata]:
+        sql = """
+            SELECT message.id, message.fromtoken, message.msg_box_id, message.seq, message.receivedts, message.contenttype
+            FROM message
+            INNER JOIN message_status ON message_status.message_id = message.id
+            INNER JOIN msg_box ON message.msg_box_id = msg_box.id
+            WHERE msg_box.externalid = @external_id
+              AND message.seq = @seq
+              AND message_status.isdeleted = false;
+        """
+        params = (external_id, sequence)
+        rows = self.db.execute(sql, params)
+        if len(rows) != 0:
+            id, fromtoken, msg_box_id, seq, receivedts, contenttype = rows[0]
+            return MessageMetadata(
+                id=id,
+                msg_box_id=msg_box_id,
+                msg_box_api_token_id=fromtoken,
+                content_type=contenttype,
+                received_ts=datetime.fromisoformat(receivedts)
+            )
+
+    def delete_message(self, message_id: int):
+        sql = "UPDATE message_status SET isdeleted = true WHERE message_id = @message_id RETURNING id;"
+        params = (message_id,)
+        rows = self.db.execute(sql, params)
+        count_deleted = len(rows)
+        return count_deleted

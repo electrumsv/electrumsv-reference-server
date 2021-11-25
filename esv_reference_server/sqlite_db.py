@@ -464,9 +464,3 @@ class SQLiteDatabase(SQLiteDatabaseBase):
         cursor = self.execute2(sql, (channel_id,))
         if cursor.rowcount != 1:
             raise DatabaseStateModifiedError
-
-    def get_max_sequence(self, api_key: str, channelid: str):
-        raise NotImplementedError()
-
-    def get_messages(self, api_key: str, channelid: str, unread: bool):
-        raise NotImplementedError()

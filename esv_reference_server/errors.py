@@ -2,9 +2,11 @@ from typing import NamedTuple
 from aiohttp.web_exceptions import HTTPForbidden, HTTPBadRequest, HTTPConflict
 
 
-class Error(NamedTuple):
-    reason: str
-    status: int
+class Error(Exception):
+
+    def __init__(self, reason: str, status: int):
+        self.reason = reason
+        self.status = status
 
 
 NoBearerToken = Error(reason="No 'Bearer' authentication", status=HTTPBadRequest.status_code)

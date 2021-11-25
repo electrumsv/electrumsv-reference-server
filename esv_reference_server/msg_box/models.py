@@ -55,3 +55,19 @@ class MsgBoxAPITokenRow(NamedTuple):
     canread: bool
     canwrite: bool
     validfrom: datetime
+
+
+class Message(NamedTuple):
+    msg_box_id: int
+    msg_box_api_token_id: int
+    content_type: str
+    payload: bytes
+    received_ts: datetime
+
+
+class MessageMetadata(NamedTuple):
+    id: int
+    msg_box_id: int
+    msg_box_api_token_id: int
+    content_type: str
+    received_ts: datetime

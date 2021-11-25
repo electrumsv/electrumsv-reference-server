@@ -1,4 +1,6 @@
+import json
 from dataclasses import dataclass
+from datetime import datetime
 
 from esv_reference_server.msg_box.models import MsgBoxAPIToken, MsgBox
 
@@ -144,3 +146,27 @@ class APITokenViewModelGet:
             "can_read": bool(self.can_write),
             "can_write": bool(self.can_read)
         }
+
+
+@dataclass(slots=True)
+class MessageViewModelGet:
+    sequence: int
+    received: datetime
+    content_type: str
+    payload: bytes
+
+    def to_dict(self):
+        if self.content_type == 'application/json':
+            return {
+                "sequence": self.sequence,
+                "received": self.received.isoformat(),
+                "content_type": self.content_type,
+                "payload": json.loads(self.payload)
+            }
+        else:
+            return {
+                "sequence": self.sequence,
+                "received": self.received.isoformat(),
+                "content_type": self.content_type,
+                "payload": self.payload.hex()
+            }
