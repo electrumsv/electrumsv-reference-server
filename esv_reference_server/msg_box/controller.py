@@ -11,7 +11,7 @@ from aiohttp import web
 
 from esv_reference_server import errors
 from esv_reference_server.errors import Error
-from esv_reference_server.msg_box.models import MsgBox, Message
+from esv_reference_server.msg_box.models import MsgBox, Message, PushNotification
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.msg_box.view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
@@ -376,6 +376,16 @@ async def write_message(request: web.Request) -> web.Response:
     message_id, msg_box_get_view = result
     logger.info(f"Message {message_id} from api_token_id: {msg_box_api_token_object.id} "
                 f"written to channel {external_id}")
+
+    # Send push notification
+    notification_new_message_text = os.getenv('NOTIFICATION_TEXT_NEW_MESSAGE', "New message arrived")
+    notification = PushNotification(
+        msg_box=msg_box,
+        notification_new_message_text=notification_new_message_text,
+        received_ts=message.received_ts
+    )
+    app_state.msg_box_new_msg_queue.put((msg_box_api_token_object.id, notification))
+
     return web.json_response(msg_box_get_view.to_dict())
 
 
@@ -525,7 +535,3 @@ async def delete_message(request: web.Request) -> web.Response:
     count_deleted = msg_box_repository.delete_message(message_metadata.id)
     logger.info(f"Deleted {count_deleted} messages for sequence: {sequence} in msg_box: {external_id}.")
     return web.HTTPOk()
-
-# ----- NOTIFICATION & PUSH NOTIFICATION API ----- #
-async def subscribe_to_push_notifications(request: web.Request) -> web.Response:
-    return web.HTTPNotImplemented()

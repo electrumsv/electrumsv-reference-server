@@ -71,3 +71,16 @@ class MessageMetadata(NamedTuple):
     msg_box_api_token_id: int
     content_type: str
     received_ts: datetime
+
+
+class PushNotification(NamedTuple):
+    msg_box: MsgBox
+    notification_new_message_text: str
+    received_ts: datetime
+
+    def to_dict(self):
+        return {
+            "channel_id": self.msg_box.id,
+            "notification": self.notification_new_message_text,
+            "received": self.received_ts.isoformat()
+        }
