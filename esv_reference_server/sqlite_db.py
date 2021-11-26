@@ -1,6 +1,12 @@
-"""Much of this class and the connection pooling logic is inspired by and/or copied from the
+"""
+Copyright(c) 2021 Bitcoin Association.
+Distributed under the Open BSV software license, see the accompanying file LICENSE
+
+Much of this class and the connection pooling logic is inspired by and/or copied from the
 ElectrumSV's wallet_database/sqlite_support.py and helps to avoid the overhead associated with
-creating a new db connection"""
+creating a new db connection
+"""
+
 
 from __future__ import annotations
 import logging

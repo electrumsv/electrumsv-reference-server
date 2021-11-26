@@ -1,8 +1,11 @@
-import json
+"""
+Copyright(c) 2021 Bitcoin Association.
+Distributed under the Open BSV software license, see the accompanying file LICENSE
+"""
 
 import aiohttp
 import typing
-from aiohttp import web, WSCloseCode
+from aiohttp import web
 import logging
 import uuid
 

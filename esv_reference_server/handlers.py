@@ -1,13 +1,14 @@
+"""
+Copyright(c) 2021 Bitcoin Association.
+Distributed under the Open BSV software license, see the accompanying file LICENSE
+"""
+
 from __future__ import annotations
 
-import json
-import os
-import subprocess
 from datetime import datetime, timedelta
 import logging
 import time
 from typing import Any, Dict, Optional, TYPE_CHECKING
-import uuid
 
 import aiohttp
 from aiohttp import web
