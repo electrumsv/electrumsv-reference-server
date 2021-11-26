@@ -11,5 +11,5 @@ class HeadersWSClient(NamedTuple):
 class MsgBoxWSClient(NamedTuple):
     ws_id: str
     websocket: web.WebSocketResponse
-    channel_id: str  # 64 byte base64.urlsafe_b64decode
+    msg_box_internal_id: int
     accept_type: str  # http 'Accept' header (i.e. application/json vs application/octet-stream)

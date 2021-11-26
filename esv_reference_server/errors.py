@@ -1,10 +1,26 @@
+import json
 from typing import NamedTuple
 from aiohttp.web_exceptions import HTTPForbidden, HTTPBadRequest, HTTPConflict
 
 
-class Error(NamedTuple):
-    reason: str
-    status: int
+class Error(Exception):
+
+    def __init__(self, reason: str, status: int):
+        self.reason = reason
+        self.status = status
+
+    def to_websocket_dict(self):
+        return {"error": {"reason": self.reason,
+                          "status_code": self.status}}
+
+    @classmethod
+    def from_websocket_dict(cls, message: dict):
+        reason = message["error"]["reason"]
+        status = message["error"]["status_code"]
+        return cls(reason, status)
+
+    def __str__(self):
+        return f"Error(reason={self.reason}, status={self.status})"
 
 
 NoBearerToken = Error(reason="No 'Bearer' authentication", status=HTTPBadRequest.status_code)

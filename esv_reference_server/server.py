@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 
@@ -12,6 +13,8 @@ import queue
 import threading
 from typing import AsyncIterator, Dict
 
+from esv_reference_server.handlers_msg_box_ws import MsgBoxWebSocket
+from esv_reference_server.msg_box.models import PushNotification
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient
 from .constants import Network, SERVER_HOST, SERVER_PORT
@@ -50,6 +53,7 @@ class ApplicationState(object):
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
         self.msg_box_new_msg_queue = queue.Queue()  # json only
+        self.subscriptions_cache = {}  # msg_box_id: NotificationSubscription
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(MODULE_DIR.parent / 'esv_reference_server.db')
@@ -146,10 +150,12 @@ class ApplicationState(object):
     def message_box_notifications_thread(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
+            notification: PushNotification
+            msg_box_api_token_id: int
+            ws_client: MsgBoxWSClient
             while self.app.is_alive:
                 try:
-                    # Todo push new messages to Queue
-                    self.msg_box_new_msg_queue.get()
+                    msg_box_api_token_id, notification = self.msg_box_new_msg_queue.get()
                 except Exception as e:
                     logger.exception(e)
                     continue
@@ -157,15 +163,16 @@ class ApplicationState(object):
                 if not len(self.get_msg_box_ws_clients()):
                     continue
 
-                # Todo Send new tip notification to the relevant websocket client
-                #  (based on channel_id)
+                # Send new message notifications to the relevant (and authenticated)
+                # websocket client (based on msg_box_id)
+                # Todo - for efficiency there needs to be a key: value cache to
+                #  lookup the relevant clients - iterating over all clients is poor form...
                 for ws_id, ws_client in self.get_msg_box_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
+                    if ws_client.msg_box_internal_id == notification.msg_box.id:
+                        msg = json.dumps(notification.notification_new_message_text)
 
-                    # Todo - add standardised Peer Channel Format notification message here
-                    response = {}
-
-                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_json(response),
+                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_json(notification.to_dict()),
                         self.loop)
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
@@ -209,7 +216,7 @@ def get_aiohttp_app(network: Network) -> web.Application:
     # This is the standard aiohttp way of managing state within the handlers
     app['app_state'] = app_state
     app['headers_ws_clients'] = app_state.headers_ws_clients
-    app['headers_ws_clients'] = app_state.msg_box_ws_clients
+    app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
 
     # Non-optional APIs
     app.add_routes([
@@ -244,7 +251,7 @@ def get_aiohttp_app(network: Network) -> web.Application:
         web.delete("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.delete_message),
 
         # Message Box Websocket API
-        web.get("/api/v1/channel/{channelid}/notify", msg_box.controller.subscribe_to_push_notifications),
+        web.view("/api/v1/channel/{channelid}/notify", MsgBoxWebSocket),
     ])
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
