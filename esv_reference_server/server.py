@@ -18,19 +18,19 @@ import queue
 import threading
 from typing import AsyncIterator, Dict
 
-from esv_reference_server.handlers_msg_box_ws import MsgBoxWebSocket
+from esv_reference_server.handlers_headers import HeadersWebSocket
+from esv_reference_server.msg_box.controller import MsgBoxWebSocket
 from esv_reference_server.msg_box.models import PushNotification
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient
 from .constants import Network, SERVER_HOST, SERVER_PORT
-from .handlers_headers_ws import HeadersWebSocket
 
 from .keys import create_regtest_server_keys, ServerKeys
-from . import handlers
+from . import handlers, handlers_headers
 from esv_reference_server import msg_box
 from .sqlite_db import SQLiteDatabase
 
-from aiohttp_swagger3 import SwaggerDocs, SwaggerUiSettings, SwaggerFile
+from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile
 
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -266,10 +266,11 @@ def get_aiohttp_app(network: Network) -> web.Application:
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         swagger.add_routes([
-            web.get("/api/v1/header/{hash}", handlers.get_header),
-            web.get("/api/v1/header", handlers.get_headers_by_height),
-            web.get("/api/v1/chain/tips", handlers.get_chain_tips),
-            web.view("/api/v1/headers/websocket", HeadersWebSocket),
+            web.get("/api/v1/header/{hash}", handlers_headers.get_header),
+            web.get("/api/v1/header", handlers_headers.get_headers_by_height),
+            web.get("/api/v1/chain/tips", handlers_headers.get_chain_tips),
+            web.view("/api/v1/chain/tips/websocket", HeadersWebSocket),
+            web.get("/api/v1/network/peers", handlers_headers.get_peers),
         ])
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
