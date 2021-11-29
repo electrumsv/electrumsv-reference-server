@@ -1,0 +1,483 @@
+openapi: "3.0.0"
+info:
+  description: |
+    This server is designed to expose virtually all of the APIs that ElectrumSV depends on
+    under one roof. The full set of APIs are divided into sub-groupings, each containing
+    one or more endpoints.
+  version: 1.0.0
+  title: ElectrumSV Server
+  license:
+    name: Open BSV License version 4
+
+paths:
+  /api/v1/endpoints:
+    get:
+      summary: Show available endpoints
+      tags:
+        - Endpoint Discovery
+      responses:
+        '200':
+          description: Show available endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apiType:
+                    type: integer
+                  apiVersion:
+                    type: string
+                  baseUrl:
+                    type: string
+                  timestamp:
+                    type: string
+                  expiryTime:
+                    type: string
+                  endpoints:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          apiType:
+                            type: string
+                          apiVersion:
+                            type: integer
+                          baseUrl:
+                            type: string
+
+  /api/v1/account:
+    get:
+      summary: Get account details
+      tags:
+        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      responses:
+        '200':
+          description: Return account information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/account/key:
+    get:
+      summary: Post keys and create an account
+      tags:
+        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      responses:
+        '200':
+          description: |
+            Start the payment channel funding process by generating a payment key for the given client.
+            If the client does not have an account this is part of the process of creating their account.
+            If the client does have an account they must not have an active payment channel.
+
+            There is no asynchronicity within this handler so it should be safe from any race conditions
+            by any client submitting multiple requests to it..
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/account/channel:
+    post:
+      summary: Accept the initial version of the contract from the client
+      tags:
+        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      responses:
+        '200':
+          description: Accept the initial version of the contract from the client. The initial version of the contract
+            acts as insurance for the client in the form of being a complete refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+    put:
+      summary: Accept a contract amendment from the client
+      tags:
+        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      responses:
+        '200':
+          description: Accept a contract amendment from the client. This is a decreased refund to themselves and
+            an increased payment to us.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    delete:
+      summary: Close the payment channel for the client.
+      tags:
+        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      responses:
+        '200':
+          description: Close the payment channel for the client.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/account/funding:
+    get:
+      summary: Receive the funding transaction from the client
+      tags:
+        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      responses:
+        '200':
+          description: Receive the funding transaction from the client. It is expected that the client will have
+            broadcast the transaction before they give it to us, although this is not a requirement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/manage/list:
+    get:
+      summary: List all Peer Channels
+      tags:
+        - Peer Channels - Channel Management APIs
+      responses:
+        '200':
+          description: List all Peer Channels
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/manage/{channelid}:
+    parameters:
+      - name: channelid
+        in: path
+        required: true
+        description: The url safe, base64 encoded external channel id
+        schema:
+          type: string
+    get:
+      summary: Get single channel details
+      tags:
+        - Peer Channels - Channel Management APIs
+      responses:
+        '200':
+          description: Get single channel details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    post:
+      summary: Update single channel details
+      tags:
+        - Peer Channels - Channel Management APIs
+      responses:
+        '200':
+          description: Update single channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    delete:
+      summary: Delete a channel
+      tags:
+        - Peer Channels - Channel Management APIs
+      responses:
+        '200':
+          description: Delete a channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/manage/:
+    post:
+      summary: Create a new Peer Channel
+      tags:
+        - Peer Channels - Channel Management APIs
+      responses:
+        '200':
+          description: Create a new Peer Channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/manage/{channelid}/api-token/{tokenid}:
+    parameters:
+      - name: channelid
+        in: path
+        required: true
+        description: The url safe, base64 encoded external channel id
+        schema:
+          type: string
+      - name: tokenid
+        in: path
+        required: true
+        description: The url safe, base64 encoded API Bearer token for the selected channel
+        schema:
+          type: string
+    get:
+      summary: Get token details
+      tags:
+        - Peer Channels - Token Management APIs
+      responses:
+        '200':
+          description: Get token details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    delete:
+      summary: Revoke selected token
+      tags:
+        - Peer Channels - Token Management APIs
+      responses:
+        '200':
+          description: Revoke selected token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/manage/{channelid}/api-token:
+    parameters:
+      - name: channelid
+        in: path
+        required: true
+        description: The url safe, base64 encoded external channel id
+        schema:
+          type: string
+    get:
+      summary: Get a list of tokens for the selected channel
+      tags:
+        - Peer Channels - Token Management APIs
+      responses:
+        '200':
+          description: Get a list of tokens for the channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    post:
+      summary: Create a new token for the selected channel
+      tags:
+        - Peer Channels - Token Management APIs
+      responses:
+        '200':
+          description: Create a new token for the selected channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/{channelid}:
+    parameters:
+      - name: channelid
+        in: path
+        required: true
+        description: The url safe, base64 encoded external channel id
+        schema:
+          type: string
+    post:
+      summary: Write message to channel
+      tags:
+        - Peer Channels - Message management APIs
+      responses:
+        '200':
+          description: Write message to channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    head:
+      summary: Get max sequence number of channel
+      tags:
+        - Peer Channels - Message management APIs
+      responses:
+        '200':
+          description: |
+            Get max sequence number of channel. The max sequence number is returned in the response
+            header's "ETag" key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    get:
+      summary: Get messages from channel
+      tags:
+        - Peer Channels - Message management APIs
+      responses:
+        '200':
+          description: Get messages from channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/{channelid}/{sequence}:
+    parameters:
+      - name: channelid
+        in: path
+        required: true
+        description: The url safe, base64 encoded external channel id
+        schema:
+          type: string
+      - name: sequence
+        in: path
+        required: true
+        description: The sequence number of the message of interest
+        schema:
+          type: integer
+    post:
+      summary: Mark messages as read or unread
+      tags:
+        - Peer Channels - Message management APIs
+      responses:
+        '200':
+          description: Mark messages as read or unread
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+    delete:
+      summary: Delete messages from channel
+      tags:
+        - Peer Channels - Message management APIs
+      responses:
+        '200':
+          description: Delete messages from channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/channel/{channelid}/notify:
+    parameters:
+      - name: channelid
+        in: path
+        required: true
+        description: The url safe, base64 encoded external channel id
+        schema:
+          type: string
+    post:
+      summary: Subscribe to websocket notifications for new messages
+      tags:
+        - Peer Channels - Websocket API
+      responses:
+        '200':
+          description: Subscribe to websocket notifications for new messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/header/{hash}:
+    parameters:
+      - name: hash
+        in: path
+        required: true
+        description: The hex encoded block hash
+        schema:
+          type: string
+          format: hex
+    get:
+      summary: Get a single raw block header
+      tags:
+        - HeaderSV APIs
+      responses:
+        '200':
+          description: Get a single raw block header
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+  /api/v1/header:
+    get:
+      summary: Get a a batch of headers by height & count
+      parameters:
+        - name: height
+          in: query
+          required: false
+          description: The starting height of the first block to return in the batch
+          schema:
+            type: integer
+            default: 0
+        - name: count
+          in: query
+          required: false
+          description: The number of blocks to return in the batch (max of 2000). Default=1
+          schema:
+            type: integer
+            default: 1
+            maximum: 2000
+      tags:
+        - HeaderSV APIs
+      responses:
+        '200':
+          description: Get a single raw block header
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Headers"
+
+#    /api/v1/chain/tips:
+#      get:
+#        summary: Get chain tips
+#        tags:
+#          - HeaderSV APIs
+#        responses:
+#          '200':
+#            description: Get chain tips
+#            content:
+#              application/json:
+#                schema:
+#                  $ref: "#/components/schemas/Headers"
+
+#if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
+#  swagger.add_routes([
+#  web.get("/api/v1/header/{hash}", handlers.get_header),
+#  web.get("/api/v1/header", handlers.get_headers_by_height),
+#  web.get("/api/v1/chain/tips", handlers.get_chain_tips),
+#  web.view("/api/v1/headers/websocket", HeadersWebSocket),
+
+components:
+  schemas:
+    NotImplementedYet:
+      type: string
+      default: "response body documentation not added yet"
+    Channel:
+      type: object
+    Channels:
+      type: array
+      items:
+        $ref: "#/components/schemas/NotImplementedYet"
+    Header:
+      type: object
+      properties:
+        hash:
+          type: string
+        version:
+          type: integer
+        prevBlockHash:
+          type: string
+        merkleRoot:
+          type: string
+        creationTimestamp:
+          type: integer
+        difficultyTarget:
+          type: integer
+        nonce:
+          type: integer
+        transactionCount:
+          type: integer
+        work:
+          type: integer
+    Headers:
+      type: array
+      items:
+        $ref: "#/components/schemas/Header"

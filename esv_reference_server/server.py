@@ -30,6 +30,8 @@ from . import handlers
 from esv_reference_server import msg_box
 from .sqlite_db import SQLiteDatabase
 
+from aiohttp_swagger3 import SwaggerDocs, SwaggerUiSettings, SwaggerFile
+
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
@@ -223,8 +225,11 @@ def get_aiohttp_app(network: Network) -> web.Application:
     app['headers_ws_clients'] = app_state.headers_ws_clients
     app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
 
+    swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
+        swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
+
     # Non-optional APIs
-    app.add_routes([
+    swagger.add_routes([
         web.get("/", handlers.ping),
         web.get("/error", handlers.error),
         web.get("/api/v1/endpoints", handlers.get_endpoints_data),
@@ -238,7 +243,7 @@ def get_aiohttp_app(network: Network) -> web.Application:
         web.post("/api/v1/account/funding", handlers.post_account_funding),
 
         # Message Box Management (i.e. Custom Peer Channels implementation)
-        web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels),
+        web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels, allow_head=False),
         web.get("/api/v1/channel/manage/{channelid}", msg_box.controller.get_single_channel_details),
         web.post("/api/v1/channel/manage/{channelid}", msg_box.controller.update_single_channel_properties),
         web.delete("/api/v1/channel/manage/{channelid}", msg_box.controller.delete_channel),
@@ -260,7 +265,7 @@ def get_aiohttp_app(network: Network) -> web.Application:
     ])
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
-        app.add_routes([
+        swagger.add_routes([
             web.get("/api/v1/header/{hash}", handlers.get_header),
             web.get("/api/v1/header", handlers.get_headers_by_height),
             web.get("/api/v1/chain/tips", handlers.get_chain_tips),

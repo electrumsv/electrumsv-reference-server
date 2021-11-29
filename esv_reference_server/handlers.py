@@ -77,7 +77,7 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
 
     accept_type = request.headers.get('Accept')
     params = request.rel_url.query
-    height = params.get('height')
+    height = params.get('height', '0')
     count = params.get('count', '1')
 
     try:
