@@ -51,7 +51,7 @@ paths:
     get:
       summary: Get account details
       tags:
-        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+        - Account Management and Authorization - Opens a micropayment channel
       responses:
         '200':
           description: Return account information
@@ -61,7 +61,7 @@ paths:
                 $ref: "#/components/schemas/NotImplementedYet"
 
   /api/v1/account/key:
-    get:
+    post:
       summary: Post keys and create an account
       tags:
         - Payment Channel Account Management and Authentication - Opens a micropayment channel
@@ -363,7 +363,7 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
-    post:
+    get:
       summary: Subscribe to websocket notifications for new messages
       tags:
         - Peer Channels - Websocket API
@@ -398,7 +398,7 @@ paths:
 
   /api/v1/header:
     get:
-      summary: Get a a batch of headers by height & count
+      summary: Get a batch of headers by height & count
       parameters:
         - name: height
           in: query
@@ -425,25 +425,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/Headers"
 
-#    /api/v1/chain/tips:
-#      get:
-#        summary: Get chain tips
-#        tags:
-#          - HeaderSV APIs
-#        responses:
-#          '200':
-#            description: Get chain tips
-#            content:
-#              application/json:
-#                schema:
-#                  $ref: "#/components/schemas/Headers"
+  /api/v1/chain/tips:
+    get:
+      summary: Get chain tips
+      tags:
+        - HeaderSV APIs
+      responses:
+        '200':
+          description: Get chain tips
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tips"
 
-#if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
-#  swagger.add_routes([
-#  web.get("/api/v1/header/{hash}", handlers.get_header),
-#  web.get("/api/v1/header", handlers.get_headers_by_height),
-#  web.get("/api/v1/chain/tips", handlers.get_chain_tips),
-#  web.view("/api/v1/headers/websocket", HeadersWebSocket),
+  /api/v1/network/peers:
+    get:
+      summary: Get bitcoin daemon network peers of the running HeaderSV instance
+      tags:
+        - HeaderSV APIs
+      responses:
+        '200':
+          description: Get bitcoin daemon network peers of the running HeaderSV instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedYet"
+
+
+  /api/v1/chain/tips/websocket:
+    get:
+      summary: Headers websocket
+      tags:
+        - HeaderSV APIs
+      responses:
+        '200':
+          description: |
+            Subscribe to websocket notifications of the new chain tip.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tips"
 
 components:
   schemas:
@@ -456,6 +477,21 @@ components:
       type: array
       items:
         $ref: "#/components/schemas/NotImplementedYet"
+    Tip:
+      type: object
+      properties:
+        header:
+          $ref: "#/components/schemas/Header"
+        state:
+          type: string
+        chainWork:
+          type: integer
+        height:
+          type: integer
+    Tips:
+      type: array
+      items:
+        $ref: "#/components/schemas/Tip"
     Header:
       type: object
       properties:

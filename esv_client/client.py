@@ -19,7 +19,7 @@ from esv_reference_server.errors import Error
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 47124
 BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
-WS_URL_HEADERS = "http://localhost:47124/api/v1/headers/websocket"
+WS_URL_HEADERS = "http://localhost:47124/api/v1/chain/tips/websocket"
 WS_URL_TEMPLATE_MSG_BOX = "http://localhost:47124/api/v1/channel/{channelid}/notify"
 
 
@@ -35,9 +35,10 @@ class ElectrumSVClient:
         self.app_state = app_state
         self.logger = logging.getLogger("electrumsv-client")
 
-    async def subscribe_to_headers_notifications(self) -> None:
+    async def subscribe_to_headers_notifications(self, api_token: str) -> None:
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(WS_URL_HEADERS, timeout=5.0) as ws:
+            headers = {"Authorization": f"Bearer {api_token}"}
+            async with session.ws_connect(WS_URL_HEADERS, headers=headers, timeout=5.0) as ws:
                 print(f'Connected to {WS_URL_HEADERS}')
 
                 async for msg in ws:
@@ -79,8 +80,15 @@ async def main() -> None:
     url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=msg_box_external_id)
     while True:
         try:
-            # await client.subscribe_to_headers_notifications()  # using aiohttp
-            await client.subscribe_to_msg_box_notifications(url, msg_box_api_token)  # using aiohttp
+            # HeaderSV
+            # NOTE: remember to set:
+            #   EXPOSE_HEADER_SV_APIS=1 &
+            #   HEADER_SV_URL=http://localhost:8080 in .env file
+            # await client.subscribe_to_headers_notifications(msg_box_api_token)
+
+            # Peer Channels
+            await client.subscribe_to_msg_box_notifications(url, msg_box_api_token)
+
         except HTTPClientError as e:
             break
         except (ConnectionRefusedError, ClientConnectorError):
