@@ -10,14 +10,18 @@ info:
     name: Open BSV License version 4
 
 paths:
+
+  # ACCOUNT MANAGEMENT AND PAYMENT CHANNEL APIs
+
   /api/v1/endpoints:
     get:
       summary: Show available endpoints
+      security: []  # no auth required
       tags:
         - Endpoint Discovery
       responses:
         '200':
-          description: Show available endpoints
+          description: Success
           content:
             application/json:
               schema:
@@ -50,99 +54,253 @@ paths:
   /api/v1/account:
     get:
       summary: Get account details
+      description: Return account information
+      security:
+        - BearerAuth: [ ]
       tags:
         - Account Management and Authorization - Opens a micropayment channel
       responses:
         '200':
-          description: Return account information
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                type: object
+                properties:
+                  public_key_hex:
+                    type: string
+                  api_key:
+                    type: string
+        '400':
+          description: Invalid API key type or no body with client key data.
+        '401':
+          description: Unauthorized - An API key was provided and it was invalid
 
   /api/v1/account/key:
     post:
       summary: Post keys and create an account
+      security:
+        - BearerAuth: [ ]
+      description: |
+        Start the payment channel funding process by generating a payment key for the given client.
+        If the client does not have an account this is part of the process of creating their account.
+        If the client does have an account they must not have an active payment channel.
+
+        There is no asynchronicity within this handler so it should be safe from any race conditions
+        by any client submitting multiple requests to it..
       tags:
         - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      requestBody:
+        description: Optional description in *Markdown*
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                public_key_hex:
+                  type: string
+                signature_hex:
+                  type: string
+                message_hex:
+                  type: string
       responses:
         '200':
-          description: |
-            Start the payment channel funding process by generating a payment key for the given client.
-            If the client does not have an account this is part of the process of creating their account.
-            If the client does have an account they must not have an active payment channel.
-
-            There is no asynchronicity within this handler so it should be safe from any race conditions
-            by any client submitting multiple requests to it..
+          description: Success
           content:
-            application/json:
+            multipart/mixed:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                type: object
+                properties:
+                  key:
+                    type: string
+                    format: binary
+                    default: <key> (application/octet-stream bytes)
+                  api-key:
+                    type: string
+                    format: binary
+                    default: <api-key> (application/octet-stream bytes)
+        '400':
+          description: Invalid API key type or no body with client key data.
+        '401':
+          description: Unauthorized - An API key was provided and it was invalid or the client key data was
+            not valid.
+        '409':
+          description: Conflict - There is an existing active payment channel
 
   /api/v1/account/channel:
     post:
+      parameters:
+        - name: funding_value
+          in: query
+          required: true
+          description: The funding value in satoshis
+          schema:
+            type: string
+            default: <satoshis>
       summary: Accept the initial version of the contract from the client
+      description: Accept the initial version of the contract from the client. The initial version of the contract
+        acts as insurance for the client in the form of being a complete refund.
+      security:
+        - BearerAuth: [ ]
       tags:
         - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: object
+              properties:
+                script:
+                  type: string
+                  format: binary
+                  default: <funding_script_bytes> (application/octet-stream bytes)
+                transaction:
+                  type: string
+                  format: binary
+                  default: <contract_transaction_bytes> (application/octet-stream bytes)
       responses:
         '200':
-          description: Accept the initial version of the contract from the client. The initial version of the contract
-            acts as insurance for the client in the form of being a complete refund.
+          description: Success
           content:
-            application/json:
+            application/octet-stream:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                type: string
+                format: binary
+                default: <account public key bytes> (application/octet-stream bytes)
+        '400':
+          description: No Bearer authentication || Channel invalid || Missing part of multipart
+            request body
+        '401':
+          description: Unauthorized - An API key was provided and it was invalid or the client key data was
+            not valid.
+        '409':
+          description: Conflict - There is an existing active payment channel
+
     put:
+      parameters:
+        - name: refund_value
+          in: query
+          required: true
+          description: The funding value in satoshis
+          schema:
+            type: string
+            default: <satoshis>
       summary: Accept a contract amendment from the client
+      description: Accept a contract amendment from the client. This is a decreased refund to themselves and
+        an increased payment to us.
+      security:
+        - BearerAuth: [ ]
       tags:
         - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: object
+              properties:
+                signature:
+                  type: string
+                  format: binary
+                  default: <refund_signature_bytes> (application/octet-stream bytes)
       responses:
         '200':
-          description: Accept a contract amendment from the client. This is a decreased refund to themselves and
-            an increased payment to us.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
+        '400':
+          description: No Bearer authentication || Channel invalid || Missing part of multipart
+            request body || Account inconsistency
+        '401':
+          description: Unauthorized - An API key was provided and it was invalid or the client key data was
+            not valid.
+        '406':
+          description: Not Acceptable
 
     delete:
+      parameters:
+        - name: refund_value
+          in: query
+          required: true
+          description: The funding value in satoshis
+          schema:
+            type: string
+            default: <satoshis>
       summary: Close the payment channel for the client.
+      security:
+        - BearerAuth: [ ]
       tags:
         - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: object
+              properties:
+                signature:
+                  type: string
+                  format: binary
+                  default: <refund_signature_bytes> (application/octet-stream bytes)
       responses:
         '200':
-          description: Close the payment channel for the client.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
+        '400':
+          description: |
+            No 'Bearer' authentication || Channel invalid || Missing part of multipart request body
+        '401':
+          description: Unauthorized
+        '406':
+          description: Not Acceptable
 
   /api/v1/account/funding:
-    get:
+    post:
       summary: Receive the funding transaction from the client
+      description: Receive the funding transaction from the client. It is expected that the client will have
+        broadcast the transaction before they give it to us, although this is not a requirement.
+      security:
+        - BearerAuth: [ ]
       tags:
         - Payment Channel Account Management and Authentication - Opens a micropayment channel
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: object
+              properties:
+                transaction:
+                  type: string
+                  format: binary
+                  default: <transaction> (application/octet-stream bytes)
       responses:
         '200':
-          description: Receive the funding transaction from the client. It is expected that the client will have
-            broadcast the transaction before they give it to us, although this is not a requirement.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
+        '400':
+          description: |
+            No 'Bearer' authentication || Channel invalid || Invalid {part_name} multipart ||
+            Missing the 'transaction' multipart payload || Channel state inconsistency
+        '401':
+          description: Unauthorized
+        '406':
+          description: Not Acceptable
+
+  # Peer Channels APIs
 
   /api/v1/channel/manage/list:
     get:
       summary: List all Peer Channels
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Channel Management APIs
       responses:
         '200':
-          description: List all Peer Channels
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Channels"
 
   /api/v1/channel/manage/{channelid}:
     parameters:
@@ -152,54 +310,64 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
+          format: url_safe_base64
     get:
       summary: Get single channel details
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Channel Management APIs
       responses:
         '200':
-          description: Get single channel details
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Channel"
 
     post:
       summary: Update single channel details
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Channel Management APIs
       responses:
         '200':
-          description: Update single channel
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/ChannelAmended"
 
     delete:
       summary: Delete a channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Channel Management APIs
       responses:
         '200':
-          description: Delete a channel
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
 
   /api/v1/channel/manage/:
     post:
       summary: Create a new Peer Channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Channel Management APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
       responses:
         '200':
-          description: Create a new Peer Channel
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Channel"
 
   /api/v1/channel/manage/{channelid}/api-token/{tokenid}:
     parameters:
@@ -209,6 +377,7 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
+          format: url_safe_base64
       - name: tokenid
         in: path
         required: true
@@ -217,27 +386,27 @@ paths:
           type: string
     get:
       summary: Get token details
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Token Management APIs
       responses:
         '200':
-          description: Get token details
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/AccessToken"
 
     delete:
       summary: Revoke selected token
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Token Management APIs
       responses:
         '200':
-          description: Revoke selected token
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
 
   /api/v1/channel/manage/{channelid}/api-token:
     parameters:
@@ -247,29 +416,46 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
+          format: url_safe_base64
     get:
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: Optional filter for searching certain token
+          schema:
+            type: string
       summary: Get a list of tokens for the selected channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Token Management APIs
       responses:
         '200':
-          description: Get a list of tokens for the channel
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/AccessTokens"
 
     post:
       summary: Create a new token for the selected channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Token Management APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccessTokenRequest"
       responses:
         '200':
-          description: Create a new token for the selected channel
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/AccessToken"
 
   /api/v1/channel/{channelid}:
     parameters:
@@ -279,43 +465,79 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
+          format: url_safe_base64
     post:
+      parameters:
+        - in: header
+          name: Content-Type
+          schema:
+            type: string
+            format: string
+          description: For example 'application/octet-stream' or 'application/json'
+          required: true
       summary: Write message to channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Message management APIs
+      description: |
+        The payload is always written in the request body in
+        binary encoded format but the 'Content-Type' header
+        instructs the recient how to decode the message.
+      requestBody:
+        content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
       responses:
         '200':
-          description: Write message to channel
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Message"
 
     head:
       summary: Get max sequence number of channel
+      description: |
+        Get max sequence number of channel. The max sequence number is returned in the response
+        header's 'ETag' key.
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Message management APIs
       responses:
         '200':
-          description: |
-            Get max sequence number of channel. The max sequence number is returned in the response
-            header's "ETag" key.
-          content:
-            application/json:
+          description: Success
+          headers:
+            ETag:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                type: integer
+              description: Max Sequence.
 
     get:
+      parameters:
+        - in: query
+          name: unread
+          schema:
+            type: boolean
+          required: false
       summary: Get messages from channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Message management APIs
       responses:
         '200':
-          description: Get messages from channel
+          description: Success
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
 
   /api/v1/channel/{channelid}/{sequence}:
     parameters:
@@ -325,6 +547,7 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
+          format: url_safe_base64
       - name: sequence
         in: path
         required: true
@@ -332,28 +555,39 @@ paths:
         schema:
           type: integer
     post:
+      parameters:
+        - in: query
+          name: older
+          schema:
+            type: boolean
+          required: false
+          description: Optional parameter to mark also all older messages
       summary: Mark messages as read or unread
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Message management APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                read:
+                  type: boolean
       responses:
         '200':
-          description: Mark messages as read or unread
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
 
     delete:
       summary: Delete messages from channel
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Message management APIs
       responses:
         '200':
-          description: Delete messages from channel
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+          description: Success
 
   /api/v1/channel/{channelid}/notify:
     parameters:
@@ -363,8 +597,11 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
+          format: url_safe_base64
     get:
       summary: Subscribe to websocket notifications for new messages
+      security:
+        - BearerAuth: [ ]
       tags:
         - Peer Channels - Websocket API
       responses:
@@ -373,9 +610,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Message"
 
-  /api/v1/header/{hash}:
+  # HEADER SV APIs
+
+  /api/v1/headers/{hash}:
     parameters:
       - name: hash
         in: path
@@ -386,23 +625,36 @@ paths:
           format: hex
     get:
       summary: Get a single raw block header
+      security:
+        - BearerAuth: [ ]
       tags:
         - HeaderSV APIs
       responses:
         '200':
           description: Get a single raw block header
           content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                default: <a single raw block header>  (application/octet-stream bytes)
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Header"
+        '400':
+          description: hash path parameter not supplied
+        '404':
+          description: Not Found (the header with this block hash was not found)
 
-  /api/v1/header:
+  /api/v1/headers/by-height:
     get:
       summary: Get a batch of headers by height & count
+      security:
+        - BearerAuth: [ ]
       parameters:
         - name: height
           in: query
-          required: false
+          required: true
           description: The starting height of the first block to return in the batch
           schema:
             type: integer
@@ -419,15 +671,30 @@ paths:
         - HeaderSV APIs
       responses:
         '200':
-          description: Get a single raw block header
+          description: Get a batch of raw block headers
           content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                default: <raw block headers array>  (application/octet-stream bytes)
             application/json:
               schema:
                 $ref: "#/components/schemas/Headers"
+        '400':
+          description: hash path parameter not supplied
+        '401':
+          description: Unauthorized Bearer Token
+        '404':
+          description: Not Found (the header with this block hash was not found)
+        '503':
+          description: Service Unavailable - means the Header SV instance running in the backend is
+            is offline.
 
   /api/v1/chain/tips:
     get:
       summary: Get chain tips
+      security: []  # no auth required
       tags:
         - HeaderSV APIs
       responses:
@@ -441,6 +708,7 @@ paths:
   /api/v1/network/peers:
     get:
       summary: Get bitcoin daemon network peers of the running HeaderSV instance
+      security: []  # no auth required
       tags:
         - HeaderSV APIs
       responses:
@@ -449,12 +717,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotImplementedYet"
+                $ref: "#/components/schemas/Peers"
 
 
   /api/v1/chain/tips/websocket:
     get:
       summary: Headers websocket
+      security: []  # no auth required
       tags:
         - HeaderSV APIs
       responses:
@@ -462,21 +731,110 @@ paths:
           description: |
             Subscribe to websocket notifications of the new chain tip.
           content:
-            application/json:
+            application/octet-stream:
               schema:
-                $ref: "#/components/schemas/Tips"
+                $ref: "#/components/schemas/TipBinary"
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: url_safe bas64
+
   schemas:
     NotImplementedYet:
       type: string
       default: "response body documentation not added yet"
+    CreateChannelRequest:
+      type: object
+      properties:
+        public_read:
+          type: string
+        public_write:
+          type: string
+        sequenced:
+          type: boolean
+        retention:
+          $ref: "#/components/schemas/Retention"
+    ChannelAmended:
+      type: object
+      properties:
+        public_read:
+          type: string
+        public_write:
+          type: string
+        locked:
+          type: boolean
     Channel:
       type: object
-    Channels:
+      properties:
+        id:
+          type: string
+        href:
+          type: string
+        public_read:
+          type: boolean
+        public_write:
+          type: boolean
+        sequenced:
+          type: boolean
+        locked:
+          type: boolean
+        head:
+          type: integer
+        retention:
+          $ref: "#/components/schemas/Retention"
+        access_tokens:
+          $ref: "#/components/schemas/AccessTokens"
+    Retention:
+      type: object
+      properties:
+        min_age_days:
+          type: integer
+        max_age_days:
+          type: integer
+        auto_prune:
+          type: boolean
+    CreateAccessTokenRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          minLength: 0
+          maxLength: 1024
+        can_read:
+          type: boolean
+        can_write:
+          type: boolean
+    AccessTokens:
       type: array
       items:
-        $ref: "#/components/schemas/NotImplementedYet"
+        $ref: "#/components/schemas/AccessToken"
+    AccessToken:
+      type: object
+      properties:
+        id:
+          type: string
+        token:
+          type: string
+        description:
+          type: string
+        can_read:
+          type: boolean
+        can_write:
+          type: boolean
+    Channels:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Channel"
+    TipBinary:
+      type: string
+      format: binary
+      default: 80 byte header + 4 byte uint32 height (application/octet-stream bytes)
     Tip:
       type: object
       properties:
@@ -492,6 +850,18 @@ components:
       type: array
       items:
         $ref: "#/components/schemas/Tip"
+    Message:
+      type: object
+      properties:
+        sequence:
+          type: integer
+        received:
+          type: string
+          format: date-time
+        content_type:
+          type: string
+        payload:
+          type: string
     Header:
       type: object
       properties:
@@ -517,3 +887,14 @@ components:
       type: array
       items:
         $ref: "#/components/schemas/Header"
+    Peer:
+      type: object
+      properties:
+        ip:
+          type: string
+        port:
+          type: integer
+    Peers:
+      type: array
+      items:
+        $ref: "#/components/schemas/Peer"

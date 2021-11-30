@@ -21,7 +21,7 @@ async def get_header(request: web.Request) -> web.Response:
     accept_type = request.headers.get('Accept')
     blockhash = request.match_info.get('hash')
     if not blockhash:
-        return web.HTTPNotFound()
+        return web.HTTPBadRequest(reason="'hash' path parameter not supplied")
 
     try:
         url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{blockhash}"
@@ -35,6 +35,9 @@ async def get_header(request: web.Request) -> web.Response:
         # else: application/json
         request_headers = {'Content-Type': 'application/json'}  # Should be 'Accept'
         async with client_session.get(url_to_fetch, headers=request_headers) as response:
+            if response.status != 200:
+                return web.Response(reason=response.reason, status=response.status)
+
             result = await response.json()
         response_headers = {'User-Agent': 'ESV-Ref-Server'}
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
@@ -57,6 +60,9 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
         if accept_type == 'application/octet-stream':
             request_headers = {'Accept': 'application/octet-stream'}
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
+                if response.status != 200:
+                    return web.Response(reason=response.reason, status=response.status)
+
                 result = await response.read()
             response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
             return web.Response(body=result, status=200, reason='OK', headers=response_headers)
