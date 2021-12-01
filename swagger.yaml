@@ -89,7 +89,7 @@ paths:
         There is no asynchronicity within this handler so it should be safe from any race conditions
         by any client submitting multiple requests to it..
       tags:
-        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+        - Account Management and Authorization - Opens a micropayment channel
       requestBody:
         description: Optional description in *Markdown*
         required: true
@@ -144,7 +144,7 @@ paths:
       security:
         - BearerAuth: [ ]
       tags:
-        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+        - Account Management and Authorization - Opens a micropayment channel
       requestBody:
         required: true
         content:
@@ -193,7 +193,7 @@ paths:
       security:
         - BearerAuth: [ ]
       tags:
-        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+        - Account Management and Authorization - Opens a micropayment channel
       requestBody:
         required: true
         content:
@@ -230,7 +230,7 @@ paths:
       security:
         - BearerAuth: [ ]
       tags:
-        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+        - Account Management and Authorization - Opens a micropayment channel
       requestBody:
         required: true
         content:
@@ -261,7 +261,7 @@ paths:
       security:
         - BearerAuth: [ ]
       tags:
-        - Payment Channel Account Management and Authentication - Opens a micropayment channel
+        - Account Management and Authorization - Opens a micropayment channel
       requestBody:
         required: true
         content:
