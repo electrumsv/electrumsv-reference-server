@@ -101,7 +101,7 @@ Endpoint                                                   | Method | Auth?  | D
 
 
 #### Paymail Hosting API
-- TBD
+- To be determined..
 
 
 ## Pro-Rata Payment Protocol
@@ -118,6 +118,9 @@ an incentive for others to run this open source service for ElectrumSV users.
 This server will be included in the [ElectrumSV SDK](https://github.com/electrumsv/headless-sdk/releases) 
 which aims to provide a first-class RegTest developer experience. 
 This is by providing a quick-launch toolkit for running services against a RegTest node.
+
+## To update the swagger-ui version for hosting
+Follow these instructions: https://github.com/peter-evans/swagger-github-pages
 
 
 ## Running The ElectrumSV Reference Server
