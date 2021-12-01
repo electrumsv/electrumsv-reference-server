@@ -1,0 +1,115 @@
+trigger:
+  batch: true
+  branches:
+    include:
+    - master
+    - releases/*
+    - features/*
+  paths:
+    exclude: [ 'README.md' ]
+
+
+jobs:
+- job: TestLinux
+  pool:
+    vmImage: 'ubuntu-latest'
+
+  steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: 3.10
+
+    - script: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install libusb-1.0-0-dev libudev-dev
+          python3 -m pip install pysqlite3-binary
+      displayName: 'Install System Dependencies'
+
+    - script: |
+        set -e
+        python3 -m pip install wheel
+        python3 -m pip install pytest pytest-cov
+        python3 -m pip install -r requirements.txt
+        python3 -m pip install -r requirements-test.txt
+      displayName: 'Install Electrumsv Reference Server'
+
+    - script: |
+        set -e
+        python3 -m pip install -U pylint
+        python3 -m pylint --rcfile ./.pylintrc ./electrumsv_sdk
+        if [ $? -gt 0 ]
+        then
+          # https://docs.pylint.org/en/1.6.0/run.html#exit-codes
+          echo "##vso[task.complete result=Failed;]DONE"
+        fi
+      continueOnError: true
+      displayName: 'Pylint'
+
+    - script: |
+        python3 -m pip install mypy
+        yes | python3 -m mypy --install-types
+        python3 -m mypy --config-file mypy.ini
+      continueOnError: true
+      displayName: 'Mypy static analysis'
+
+    - script: |
+        python3 -m pytest unittests
+      continueOnError: true
+      displayName: 'Pytest'
+
+- job: TestMacOS
+  pool:
+    vmImage: 'macOS-latest'
+
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: 3.10
+      addToPath: true
+      architecture: 'x64'
+
+  - script: |
+      brew upgrade sqlite3
+    displayName: 'Install System Dependencies'
+
+  - script: |
+      set -e
+      python3 -m pip install wheel
+      python3 -m pip install pytest pytest-cov
+      python3 -m pip install -r requirements.txt
+      python3 -m pip install -r requirements-test.txt
+    displayName: 'Install Electrumsv Reference Server'
+
+  - script: |
+      python3 -m pytest unittests
+    continueOnError: true
+    displayName: 'Pytest'
+
+- job: TestWindows
+
+  pool:
+    vmImage: 'windows-latest'
+
+  steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: 3.10
+        addToPath: true
+        architecture: 'x64'
+
+    # need to add python Scripts/ dir to PATH to find 'electrumsv-sdk' command
+    - pwsh: |
+        $scripts_dir = py -3.10 -c "import os, sys, pathlib;print(pathlib.Path(sys.executable).parent.joinpath(r'Scripts'));"
+        $env:PATH += $scripts_dir
+        py -3.10 -m pip install --upgrade pip
+        py -3.10 -m pip install wheel
+        py -3.10 -m pip install pytest pytest-cov
+        python3 -m pip install -r requirements.txt
+        python3 -m pip install -r requirements-test.txt
+      displayName: 'Install Electrumsv Reference Server'
+
+    - script: |
+        python3 -m pytest unittests
+      continueOnError: true
+      displayName: 'Pytest'
