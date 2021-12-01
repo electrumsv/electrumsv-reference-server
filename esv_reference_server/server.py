@@ -10,13 +10,13 @@ from pathlib import Path
 import aiohttp
 import bitcoinx
 import requests
-from aiohttp import web
+from aiohttp import web, BodyPartReader
 import asyncio
 import os
 import logging
 import queue
 import threading
-from typing import AsyncIterator, Dict
+from typing import AsyncIterator, Dict, Tuple, Optional
 
 from esv_reference_server.handlers_headers import HeadersWebSocket
 from esv_reference_server.msg_box.controller import MsgBoxWebSocket
@@ -30,8 +30,7 @@ from . import handlers, handlers_headers
 from esv_reference_server import msg_box
 from .sqlite_db import SQLiteDatabase
 
-from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile
-
+from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile, ValidatorError
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
@@ -197,13 +196,39 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
         > https://docs.aiohttp.org/en/stable/web_advanced.html#aiohttp-web-signals
         > https://docs.aiohttp.org/en/stable/web_advanced.html#data-sharing-aka-no-singletons-please
     """
-    logger.debug('Creating ClientSession')
     app['client_session'] = aiohttp.ClientSession()
 
     yield
 
     logger.debug('Closing ClientSession')
     await app['client_session'].close()
+
+
+# Custom media handlers
+async def application_json(request: web.Request) -> Tuple[Dict, bool]:
+    try:
+        return await request.json(), False
+    except ValueError as e:
+        raise ValidatorError(str(e))
+
+
+async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
+    try:
+        return await request.read(), True
+    except ValueError as e:
+        raise ValidatorError(str(e))
+
+
+async def multipart_mixed(request: web.Request) \
+        -> tuple[list[Optional[bytes]], bool]:
+    try:
+        reader = aiohttp.MultipartReader(request.headers, content=request.content)
+        values = []
+        async for part in reader:
+            values.append(await part.next())
+        return values, True
+    except ValueError as e:
+        raise ValidatorError(str(e))
 
 
 def get_aiohttp_app(network: Network) -> web.Application:
@@ -227,6 +252,9 @@ def get_aiohttp_app(network: Network) -> web.Application:
 
     swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
         swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
+    swagger.register_media_type_handler("application/json", application_json)
+    swagger.register_media_type_handler("application/octet-stream", application_octet_stream)
+    swagger.register_media_type_handler("multipart/mixed", multipart_mixed)
 
     # Non-optional APIs
     swagger.add_routes([
@@ -266,8 +294,8 @@ def get_aiohttp_app(network: Network) -> web.Application:
 
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         swagger.add_routes([
-            web.get("/api/v1/header/{hash}", handlers_headers.get_header),
-            web.get("/api/v1/header", handlers_headers.get_headers_by_height),
+            web.get("/api/v1/headers/by-height", handlers_headers.get_headers_by_height),
+            web.get("/api/v1/headers/{hash}", handlers_headers.get_header),
             web.get("/api/v1/chain/tips", handlers_headers.get_chain_tips),
             web.view("/api/v1/chain/tips/websocket", HeadersWebSocket),
             web.get("/api/v1/network/peers", handlers_headers.get_peers),

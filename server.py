@@ -54,7 +54,6 @@ class AiohttpServer:
         self.logger = logging.getLogger("aiohttp-rest-api")
 
     async def on_startup(self, app: web.Application) -> None:
-        self.logger.debug("starting...")
         self.logger.debug(f"file logging path={FULL_LOG_PATH}")
 
     async def on_shutdown(self, app: web.Application) -> None:
