@@ -8,9 +8,10 @@ from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 from aiohttp import web
+from aiohttp.abc import Application
 
 from esv_reference_server.server import get_aiohttp_app
-from esv_reference_server.constants import Network, SERVER_HOST, SERVER_PORT
+from esv_reference_server.constants import Network, SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
 
 if typing.TYPE_CHECKING:
     from .esv_reference_server.server import ApplicationState
@@ -54,16 +55,17 @@ class AiohttpServer:
         self.logger = logging.getLogger("aiohttp-rest-api")
 
     async def on_startup(self, app: web.Application) -> None:
-        self.logger.debug(f"file logging path={FULL_LOG_PATH}")
+        self.logger.debug(f"File logging path={FULL_LOG_PATH}")
 
     async def on_shutdown(self, app: web.Application) -> None:
-        self.logger.debug("cleaning up...")
+        self.logger.debug("Cleaning up...")
         self.app.is_alive = False
-        self.logger.debug("stopped.")
+        self.logger.debug("Stopped.")
 
     async def start(self) -> None:
         self.app.is_alive = True
-        self.logger.debug("started on http://%s:%s", self.host, self.port)
+        self.logger.debug("Started on http://%s:%s", self.host, self.port)
+        self.logger.debug("Swagger docs hosted at: http://%s:%s/api/v1/docs", self.host, self.port)
         self.runner = web.AppRunner(self.app, access_log=None)
         await self.runner.setup()
         site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
@@ -89,12 +91,28 @@ def load_dotenv(dotenv_path):
             os.environ[key] = val
 
 
-async def main():
+def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) -> Application:
     setup_logging()
     dotenv_path = MODULE_DIR.joinpath('.env')
-    load_dotenv(dotenv_path)
-    app = get_aiohttp_app(Network.REGTEST)
-    server = AiohttpServer(app)
+
+    if not os.getenv("SKIP_DOTENV_FILE") == '1':  # Used for unit testing to override usual configuration
+        load_dotenv(dotenv_path)
+
+    human_readable_network = os.getenv('NETWORK', 'regtest')
+    network_enum = STRING_TO_NETWORK_ENUM_MAP[human_readable_network]
+    logger.debug(f"Running in {human_readable_network} mode")
+
+    DEFAULT_DATASTORE_LOCATION = MODULE_DIR / 'esv_reference_server.sqlite'
+    datastore_location = os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION)
+    logger.debug(f"Datastore location: {datastore_location}")
+
+    app = get_aiohttp_app(network_enum, datastore_location, host, port)
+    return app
+
+
+async def main():
+    app, host, port = get_app()
+    server = AiohttpServer(app, host, port)
     try:
         await server.start()
     finally:

@@ -3,3 +3,5 @@
 *.log
 *.db
 *.mmap
+*.sqlite
+*.coverage*

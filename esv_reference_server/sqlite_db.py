@@ -12,13 +12,22 @@ from __future__ import annotations
 import logging
 import os
 import queue
-import sqlite3
+
+try:
+    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
+    import pysqlite3 as sqlite3
+except ModuleNotFoundError:
+    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
+    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
+    import sqlite3  # type: ignore
+
 import threading
 import time
 from pathlib import Path
 from typing import Any, Set, List, NamedTuple, Optional, Tuple
 
 from .constants import AccountFlags, ChannelState
+from .msg_box.utils import create_account_api_token
 
 """
 Useful regexes for searching codebase:
@@ -119,7 +128,7 @@ class SQLiteDatabaseBase:
     2) low latency due to caching the connections prior to use
     """
 
-    def __init__(self, storage_path: Path = Path('esv_reference_server.db')):
+    def __init__(self, storage_path: Path = Path('esv_reference_server.sqlite')):
         self.logger = logging.getLogger("sqlite-database-base")
         self.storage_path = storage_path
         self.conn = sqlite3.connect(self.storage_path)
@@ -230,11 +239,13 @@ class SQLiteDatabaseBase:
             queries.append(f"DROP TABLE {table};")
 
         for query in queries:
+            self.logger.debug(f"Running sql: {query}")
             self.execute(query)
 
     def get_tables(self):
-        sql = """SELECT name FROM sqlite_schema WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
+        sql = """SELECT name FROM sqlite_master WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
         return self.execute(sql)
+
 
     def reset_tables(self):
         self.drop_tables()
@@ -249,7 +260,7 @@ class SQLiteDatabase(SQLiteDatabaseBase):
     2) low latency due to caching the connections prior to use
     """
 
-    def __init__(self, storage_path: Path = Path('esv_reference_server.db')):
+    def __init__(self, storage_path: Path = Path('esv_reference_server.sqlite')):
         self.logger = logging.getLogger("sqlite-database")
         super().__init__(storage_path)
 
@@ -267,16 +278,24 @@ class SQLiteDatabase(SQLiteDatabaseBase):
             public_key_bytes        BINARY(32),
             active_channel_id       INTEGER DEFAULT NULL,
             last_payment_key_index  INTEGER DEFAULT 0,
-            api_key                 TEXT DEFAULT NULL
+            api_key                 TEXT NOT NULL
         )
         """
         self.execute(sql)
 
-    def create_account(self, public_key_bytes: bytes) -> Tuple[int, str]:
+        sql = f"""
+        CREATE INDEX IF NOT EXISTS master_api_key_idx ON accounts (api_key);
+        """
+        self.execute(sql)
+
+    def create_account(self, public_key_bytes: bytes, forced_api_key: Optional[str] = None) -> Tuple[int, str]:
         sql = """
         INSERT INTO accounts (public_key_bytes, api_key) VALUES (?, ?)
         """
-        api_key = os.urandom(32).hex()
+        if forced_api_key:
+            api_key = forced_api_key  # Should ONLY be used for REGTEST_VALID_ACCOUNT_TOKEN
+        else:
+            api_key = create_account_api_token()
         cursor = self.execute2(sql, (public_key_bytes, api_key))
         # This should be set for INSERT and REPLACE operations.
         assert cursor.lastrowid is not None

@@ -21,7 +21,7 @@ from esv_reference_server.msg_box.models import MsgBox, Message, PushNotificatio
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.msg_box.view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
-from esv_reference_server.types import MsgBoxWSClient
+from esv_reference_server.types import MsgBoxWSClient, EndpointInfo
 
 if TYPE_CHECKING:
     from esv_reference_server.server import ApplicationState
@@ -42,9 +42,7 @@ def _try_read_bearer_token(request: web.Request) -> Optional[str]:
 def _auth_ok(api_key: str, db: SQLiteDatabase) -> bool:
     account_id, _account_flags = db.get_account_id_for_api_key(api_key)
     if account_id is None:
-        # return False
-        # TODO - put this back to False after implementation is complete
-        return True
+        return False
     return True
 
 
@@ -56,10 +54,10 @@ def _auth_for_channel_token(token: str, external_id: str, msg_box_repository: Ms
 
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox):
-    get_messages_route = request.app.router.get('get_messages').canonical.format(
+    API_ROUTE_DEFS: dict[str, EndpointInfo] = request.app.API_ROUTE_DEFS
+    get_messages_url = API_ROUTE_DEFS['get_messages'].url.format(
         channelid=msg_box.external_id)
-    base_url = str(request.url).replace(request.url.path, "")
-    get_messages_href = base_url + get_messages_route
+    get_messages_href = get_messages_url
     msg_box_view_get = MsgBoxViewModelGet.from_msg_box(msg_box, href=get_messages_href)
     return msg_box_view_get
 
@@ -174,7 +172,7 @@ async def delete_channel(request: web.Request) -> web.Response:
     msg_box_view_delete: MsgBoxViewModelAmend = msg_box_repository.delete_msg_box(external_id)
 
     logger.info(f"Channel Deleted.")
-    return web.HTTPNoContent()
+    raise web.HTTPNoContent()
 
 
 async def create_new_channel(request: web.Request) -> web.Response:
@@ -183,6 +181,7 @@ async def create_new_channel(request: web.Request) -> web.Response:
         msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
         db: SQLiteDatabase = app_state.sqlite_db
 
+        logger.debug(request.headers)
         api_key = _try_read_bearer_token(request)
         if not api_key:
             return web.Response(reason=errors.NoBearerToken.reason, status=errors.NoBearerToken.status)
@@ -233,7 +232,7 @@ async def revoke_selected_token(request: web.Request) -> web.Response:
     token_id = request.match_info.get('tokenid')
 
     msg_box_repository.delete_api_token(token_id)
-    return web.HTTPNoContent()
+    raise web.HTTPNoContent()
 
 
 async def get_token_details(request: web.Request) -> web.Response:
@@ -333,14 +332,14 @@ async def write_message(request: web.Request) -> web.Response:
         return web.Response(reason="channel id wasn't provided", status=404)
 
     # Note this bearer token is the channel-specific one
-    msg_box_api_token = _try_read_bearer_token(request)
+    msg_box_api_token = _try_read_bearer_token(request)  # or can be the account master bearer token
     if not msg_box_api_token:
         return web.Response(reason=errors.NoBearerToken.reason, status=errors.NoBearerToken.status)
 
     if not _auth_for_channel_token(msg_box_api_token, external_id, msg_box_repository):
         raise web.HTTPUnauthorized
 
-    MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH'))
+    MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH', '0'))
 
     if request.content_type is None or request.content_type == '':
         return web.Response(reason="missing content type header", status=400)
@@ -402,7 +401,7 @@ def _get_messages_head(external_id: str, msg_box_api_token: str,
 
     max_sequence = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
     if max_sequence is None:
-        return web.HTTPNotFound()
+        raise web.HTTPNotFound()
 
     max_sequence = str(max_sequence)
 
@@ -411,7 +410,7 @@ def _get_messages_head(external_id: str, msg_box_api_token: str,
     response_headers.update({'User-Agent': 'ESV-Ref-Server'})
     response_headers.update({'Access-Control-Expose-Headers': 'authorization,etag'})
     response_headers.update({'ETag': max_sequence})
-    return web.HTTPOk(headers=response_headers)
+    raise web.HTTPOk(headers=response_headers)
 
 
 def _get_messages(channelid: str, api_token_id: int, onlyunread: bool, accept_type: str,
@@ -421,7 +420,7 @@ def _get_messages(channelid: str, api_token_id: int, onlyunread: bool, accept_ty
     message_list, max_sequence = msg_box_repository.get_messages(api_token_id, onlyunread)
     logger.info(f"Returning {len(message_list)} messages for channel: {channelid}.")
     if accept_type == 'application/octet-stream':
-        return web.HTTPNotImplemented()
+        raise web.HTTPNotImplemented()
     else:
         response_headers = {}
         response_headers.update({'User-Agent': 'ESV-Ref-Server'})
@@ -493,7 +492,7 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
             return web.Response(reason="Sequence not found", status=404)
 
         msg_box_repository.mark_messages(external_id, msg_box_api_token_obj.id, sequence, older, set_read_to)
-        return web.HTTPOk()
+        raise web.HTTPOk()
     except JSONDecodeError as e:
         logger.exception(e)
         return web.Response(reason="JSONDecodeError: " + str(e), status=400)
@@ -541,7 +540,7 @@ async def delete_message(request: web.Request) -> web.Response:
 
     count_deleted = msg_box_repository.delete_message(message_metadata.id)
     logger.info(f"Deleted {count_deleted} messages for sequence: {sequence} in msg_box: {external_id}.")
-    return web.HTTPOk()
+    raise web.HTTPOk()
 
 
 class MsgBoxWebSocket(web.View):
