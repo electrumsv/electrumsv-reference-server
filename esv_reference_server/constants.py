@@ -10,6 +10,7 @@ from bitcoinx import PrivateKey, sha256
 
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 47124
+BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
 
 # These should be used for Regtest only.
 REGTEST_PRIVATE_KEY_HEX = "9f9746a336ebf3748fe8e790f979075b785a4ec9ae1cbdfb9692ee024a03a3cb"
@@ -62,3 +63,11 @@ class Network(IntEnum):
     TESTNET = 2
     STN = 3
     MAINNET = 4
+
+
+STRING_TO_NETWORK_ENUM_MAP = {
+    'regtest': Network.REGTEST,
+    'mainnet': Network.MAINNET,
+    'scaling-testnet': Network.STN,
+    'testnet': Network.TESTNET
+}

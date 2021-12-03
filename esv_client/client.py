@@ -18,7 +18,6 @@ from esv_reference_server.errors import Error
 
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 47124
-BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
 WS_URL_HEADERS = "http://localhost:47124/api/v1/chain/tips/websocket"
 WS_URL_TEMPLATE_MSG_BOX = "http://localhost:47124/api/v1/channel/{channelid}/notify"
 
@@ -55,10 +54,10 @@ class ElectrumSVClient:
                 print(f'Connected to {url}')
 
                 async for msg in ws:
+                    print('New message from msg box: ', msg.data)
                     msg: aiohttp.WSMessage
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         content = json.loads(msg.data)
-                        print('New message from msg box: ', content)
                         if content.get('error'):
                             error: Error = Error.from_websocket_dict(content)
                             print(f"Websocket error: {error}")
@@ -75,8 +74,8 @@ class ElectrumSVClient:
 async def main() -> None:
     app_state = MockApplicationState()
     client = ElectrumSVClient(app_state)
-    msg_box_external_id = "HAECY_dKwCam1BexdRjYBklWBICXWTPud0IgqnDq7rwJRYAWl86X9fWJSuo528q1aZ34xs1TtImpP0mrUprerA=="
-    msg_box_api_token = "MkAmn-DSMbXfKAlglTrl_-_Cjc77J0yzbamUcGQYcGRDBfK0O1i3vCZoK-iMo9-mbEONGWM6thx3RYlkAC237w=="
+    msg_box_external_id = "2y2A4zN1eLL7LHmNr8oFUbe4BD4IMr2jtBIT9EWTSb9xoTeZHY2n578dM83_C6m2GH52FJFgRavJBiNW73Lrvg=="
+    msg_box_api_token = "_GaA5PlJ8WTF8OqhI6D6HAmlwYe8UbJgtRYZ2HxgdlAQ2H4KXNdcxtcztJ3C_wquz3bu1lAyjbWzjmkZMLGZfQ=="
     url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=msg_box_external_id)
     while True:
         try:

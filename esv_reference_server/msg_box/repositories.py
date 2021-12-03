@@ -3,7 +3,15 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 import logging
-import sqlite3
+
+try:
+    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
+    import pysqlite3 as sqlite3
+except ModuleNotFoundError:
+    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
+    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
+    import sqlite3  # type: ignore
+
 import typing
 from typing import Optional, Union
 from datetime import datetime
@@ -73,7 +81,6 @@ class MsgBoxSQLiteRepository:
                 UNIQUE (msg_box_id, seq),
                 FOREIGN KEY (fromtoken) REFERENCES msg_box_api_token (id),
                 FOREIGN KEY (msg_box_id) REFERENCES msg_box (id)
-
             )""")
         self.db.execute2(sql)
 

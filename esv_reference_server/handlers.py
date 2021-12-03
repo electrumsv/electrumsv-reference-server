@@ -35,11 +35,7 @@ logger = logging.getLogger('handlers')
 
 
 async def ping(request: web.Request) -> web.Response:
-    return web.Response(text="true")
-
-
-async def error(request: web.Request) -> web.Response:
-    raise ValueError("This is a test of raising an exception in the handler")
+    return web.Response(text="ElectrumSV Reference Server")
 
 
 async def get_account(request: web.Request) -> web.Response:

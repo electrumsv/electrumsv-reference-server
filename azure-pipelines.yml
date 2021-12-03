@@ -23,7 +23,8 @@ jobs:
           set -e
           sudo apt-get update
           sudo apt-get install libusb-1.0-0-dev libudev-dev
-          python3 -m pip install pysqlite3-binary
+          python3 -m pip install -U pysqlite3-binary
+          python3 -c "import pysqlite3; print(pysqlite3.sqlite_version)"
       displayName: 'Install System Dependencies'
 
     - script: |
@@ -54,9 +55,11 @@ jobs:
       displayName: 'Mypy static analysis'
 
     - script: |
-        python3 -m pytest unittests
+        coverage run --parallel-mode -m pytest unittests --verbose
+        coverage combine --append
+        coverage report -m
       continueOnError: true
-      displayName: 'Pytest'
+      displayName: 'Pytest with Coverage report'
 
 - job: TestMacOS
   pool:
@@ -82,9 +85,11 @@ jobs:
     displayName: 'Install Electrumsv Reference Server'
 
   - script: |
-      python3 -m pytest unittests
+      coverage run --parallel-mode -m pytest unittests --verbose
+      coverage combine --append
+      coverage report -m
     continueOnError: true
-    displayName: 'Pytest'
+    displayName: 'Pytest with Coverage report'
 
 - job: TestWindows
 
@@ -110,6 +115,8 @@ jobs:
       displayName: 'Install Electrumsv Reference Server'
 
     - script: |
-        python3 -m pytest unittests
+        coverage run --parallel-mode -m pytest unittests --verbose
+        coverage combine --append
+        coverage report -m
       continueOnError: true
-      displayName: 'Pytest'
+      displayName: 'Pytest with Coverage report'

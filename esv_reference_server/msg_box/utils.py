@@ -11,4 +11,5 @@ def create_external_id():
     return base64.urlsafe_b64encode(rnd_bytes).decode('utf-8')
 
 
+create_account_api_token = create_external_id  # one of these master bearer tokens per account
 create_channel_api_token = create_external_id
