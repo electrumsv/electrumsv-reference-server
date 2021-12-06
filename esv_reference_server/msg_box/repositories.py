@@ -19,7 +19,7 @@ from datetime import datetime
 from esv_reference_server import errors
 from esv_reference_server.errors import Error
 from esv_reference_server.msg_box import models, view_models, utils
-from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken, Message, MessageMetadata
+from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken, MessageMetadata
 from esv_reference_server.msg_box.view_models import APITokenViewModelGet
 
 if typing.TYPE_CHECKING:
@@ -153,8 +153,10 @@ class MsgBoxSQLiteRepository:
             autoprune=msg_box_view_create.retention.auto_prune,
         )
         sql = f"""
-            INSERT INTO msg_box (account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, maxagedays, autoprune)
-            VALUES(@owner, @externalid, @publicread, @publicwrite, @locked, @sequenced, @minagedays, @maxagedays, @autoprune)
+            INSERT INTO msg_box (account_id, externalid, publicread, publicwrite, locked, 
+                sequenced, minagedays, maxagedays, autoprune)
+            VALUES(@owner, @externalid, @publicread, @publicwrite, @locked, 
+                   @sequenced, @minagedays, @maxagedays, @autoprune)
             RETURNING *;
         """
         connection = self.db.acquire_connection()
@@ -163,7 +165,8 @@ class MsgBoxSQLiteRepository:
         try:
             cur.execute(sql, msg_box_row)
 
-            id, account_id, externalid, publicread, publicwrite, locked, sequenced, \
+            id, account_id, externalid, publicread, \
+                publicwrite, locked, sequenced, \
                 minagedays, maxagedays, autoprune = cur.fetchone()
 
             msg_box_api_token_row = models.MsgBoxAPITokenRow(
@@ -176,7 +179,8 @@ class MsgBoxSQLiteRepository:
                 validfrom=datetime.utcnow(),
             )
             cur = self.create_msg_box_api_token(cur, msg_box_api_token_row)
-            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = cur.fetchone()
+            id, account_id, msg_box_id, token, description, \
+                canread, canwrite, validfrom, validto = cur.fetchone()
             new_api_token = MsgBoxAPIToken(
                 id=id,
                 account_id=account_id,
@@ -204,7 +208,8 @@ class MsgBoxSQLiteRepository:
     def create_msg_box_api_token(self, cur: sqlite3.Cursor,
             msg_box_api_token_row: models.MsgBoxAPITokenRow) -> sqlite3.Cursor:
         sql = f"""
-            INSERT INTO msg_box_api_token (account_id, msg_box_id, token, description, canread, canwrite, validfrom)
+            INSERT INTO msg_box_api_token (account_id, msg_box_id, token, description, canread, 
+                canwrite, validfrom)
             VALUES(@account_id, @msg_box_id, @token, @description, @canread, @canwrite, @validfrom)
             RETURNING *;
         """
@@ -216,7 +221,8 @@ class MsgBoxSQLiteRepository:
         msg_box_api_tokens = []
         for row in rows:
             row: models.MsgBoxAPITokenRow
-            id, account_id, msg_box_externalid, token, description, canread, canwrite, validfrom, validto = row
+            id, account_id, msg_box_externalid, token, \
+                description, canread, canwrite, validfrom, validto = row
             msg_api_token = MsgBoxAPIToken(id=id, account_id=account_id, msg_box_id=msg_box_id,
                 token=token, description=description, can_read=canread, can_write=canwrite,
                 valid_from=validfrom, valid_to=validto)
@@ -225,8 +231,9 @@ class MsgBoxSQLiteRepository:
 
     def get_msg_box(self, account_id: int, externalid: str) -> Optional[MsgBox]:
         sql = f"""
-            SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, 
-                maxagedays, autoprune, (select max(seq) FROM message where msg_box.id = message.msg_box_id) AS seq
+            SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced, 
+                   minagedays, maxagedays, autoprune, 
+                   (SELECT max(seq) FROM message WHERE msg_box.id = message.msg_box_id) AS seq
             FROM msg_box
             WHERE account_id = @account_id AND externalid = @externalid;
         """
@@ -234,7 +241,8 @@ class MsgBoxSQLiteRepository:
         if len(rows) == 0:
             return
 
-        id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, maxagedays, autoprune, head_message_sequence = rows[0]
+        id, account_id, externalid, publicread, publicwrite, locked, \
+            sequenced, minagedays, maxagedays, autoprune, head_message_sequence = rows[0]
         msg_box_api_tokens = self.get_msg_box_tokens(id)
         head_message_sequence = head_message_sequence if head_message_sequence else 0
 
@@ -248,8 +256,9 @@ class MsgBoxSQLiteRepository:
 
     def get_msg_boxes(self, account_id: int) -> list[MsgBox]:
         sql = f"""
-            SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, 
-                maxagedays, autoprune, (select max(seq) FROM message where msg_box.id = message.msg_box_id) AS seq
+            SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced, 
+                   minagedays, maxagedays, autoprune, 
+                   (SELECT max(seq) FROM message WHERE msg_box.id = message.msg_box_id) AS seq
             FROM msg_box
             WHERE account_id = @account_id;
         """
@@ -257,7 +266,8 @@ class MsgBoxSQLiteRepository:
 
         msg_boxes = []
         for row in rows:
-            id, account_id, externalid, publicread, publicwrite, locked, sequenced, minagedays, maxagedays, autoprune, head_message_sequence = row
+            id, account_id, externalid, publicread, publicwrite, \
+                locked, sequenced, minagedays, maxagedays, autoprune, head_message_sequence = row
             msg_box_api_tokens = self.get_msg_box_tokens(id)
             head_message_sequence = head_message_sequence if head_message_sequence else 0
 
@@ -282,13 +292,16 @@ class MsgBoxSQLiteRepository:
                 return
 
             msg_box_id = result[0]
-            # Peer Channels Reference uses this query to subsequently evict tokens from the cache
-            # we are using the SQLite cache so do not need to do this
-            # selectAPITokens = "SELECT * FROM msg_box_api_token WHERE msg_box_id = @msg_box_id;"
-            # apiTokens = cur.execute(selectChannelByExternalId).fetchall()
+            # Peer Channels C# Reference evicts tokens from the cache and runs this query first:
+            #   selectAPITokens = "SELECT * FROM msg_box_api_token WHERE msg_box_id = @msg_box_id;"
+            #   apiTokens = cur.execute(selectChannelByExternalId).fetchall()
+            # We are not using a cache (at the present moment) so this is skipped.
+
             statements = [
-                """DELETE FROM message_status 
-                        WHERE message_id IN (SELECT id FROM message WHERE message.msg_box_id = @msg_box_id);""",
+                """DELETE FROM message_status
+                        WHERE message_id IN (
+                            SELECT id FROM message WHERE message.msg_box_id = @msg_box_id
+                        );""",
                 """DELETE FROM message WHERE msg_box_id = @msg_box_id;""",
                 """DELETE FROM msg_box_api_token WHERE msg_box_id = @msg_box_id;""",
                 """DELETE FROM msg_box WHERE id = @msg_box_id;""",
@@ -311,7 +324,8 @@ class MsgBoxSQLiteRepository:
         token = utils.create_channel_api_token()
 
         sql = """
-            INSERT INTO msg_box_api_token (account_id, msg_box_id, token, description, canread, canwrite, validfrom)
+            INSERT INTO msg_box_api_token 
+                (account_id, msg_box_id, token, description, canread, canwrite, validfrom)
             VALUES(@account_id, @msg_box_id, @token, @description, @canread, @canwrite, @validfrom)
             RETURNING *;
         """
@@ -323,8 +337,10 @@ class MsgBoxSQLiteRepository:
         )
         rows = self.db.execute(sql, params)
         if len(rows) != 0:
-            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
-            return APITokenViewModelGet(id=id, token=token, description=description, can_read=canread, can_write=canwrite)
+            id, account_id, msg_box_id, token, \
+                description, canread, canwrite, validfrom, validto = rows[0]
+            return APITokenViewModelGet(id=id, token=token, description=description,
+                can_read=canread, can_write=canwrite)
 
     def get_api_token_by_id(self, token_id: int) -> APITokenViewModelGet:
         sql = "SELECT * FROM msg_box_api_token " \
@@ -332,7 +348,8 @@ class MsgBoxSQLiteRepository:
         params = (token_id, datetime.utcnow())
         rows = self.db.execute(sql, params)
         if len(rows) != 0:
-            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
+            id, account_id, msg_box_id, token, \
+                description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
                 can_read=canread, can_write=canwrite)
 
@@ -343,8 +360,10 @@ class MsgBoxSQLiteRepository:
         params = (token, datetime.utcnow())
         rows = self.db.execute(sql, params)
         if len(rows) != 0:
-            id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = rows[0]
-            return MsgBoxAPIToken(id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto)
+            id, account_id, msg_box_id, token, description, \
+                canread, canwrite, validfrom, validto = rows[0]
+            return MsgBoxAPIToken(id, account_id, msg_box_id,
+                token, description, canread, canwrite, validfrom, validto)
 
     def get_api_tokens(self, external_id: str, token: Optional[str]) \
             -> Optional[list[APITokenViewModelGet]]:
@@ -353,15 +372,18 @@ class MsgBoxSQLiteRepository:
         FROM msg_box_api_token
         INNER JOIN msg_box ON msg_box_api_token.msg_box_id = msg_box.id
         WHERE msg_box.externalid = @external_id
-          AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto) and (@token IS NULL or msg_box_api_token.token = @token);
+          AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto) 
+          AND (@token IS NULL or msg_box_api_token.token = @token);
         """
         params = (external_id, datetime.utcnow(), token)
         rows = self.db.execute(sql, params)
         if len(rows) != 0:
             result = []
             for row in rows:
-                id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, validto = row
-                view = APITokenViewModelGet(id=id, token=token, description=description, can_read=canread, can_write=canwrite)
+                id, account_id, msg_box_id, token, description, canread, canwrite, \
+                    validfrom, validto = row
+                view = APITokenViewModelGet(id=id, token=token, description=description,
+                    can_read=canread, can_write=canwrite)
                 result.append(view.to_dict())
             return result
 
@@ -419,7 +441,12 @@ class MsgBoxSQLiteRepository:
 
             sql = """
                 INSERT INTO message (fromtoken, msg_box_id, seq, receivedts, contenttype, payload)
-                SELECT @fromtoken, @msg_box_id, COALESCE(MAX(seq) + 1, 1) AS seq, @receivedts, @contenttype, @payload
+                SELECT @fromtoken, 
+                       @msg_box_id, 
+                       COALESCE(MAX(seq) + 1, 1) AS seq, 
+                       @receivedts, 
+                       @contenttype, 
+                       @payload
                 FROM message
                 WHERE msg_box_id = @msg_box_id
                 RETURNING * ;
@@ -489,7 +516,8 @@ class MsgBoxSQLiteRepository:
                     SELECT 'x'
                     FROM msg_box_api_token
                     WHERE msg_box_api_token.token = @token
-                        AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto)
+                        AND (msg_box_api_token.validto IS NULL 
+                        OR msg_box_api_token.validto >= @validto)
                         AND NOT msg_box_api_token.id = message.fromtoken
                 )
                 AND EXISTS(
@@ -603,7 +631,7 @@ class MsgBoxSQLiteRepository:
         return False
 
     def mark_messages(self, external_id: str, token_id: int, sequence: int, mark_older: bool,
-            set_read_to: bool) -> Optional[int]:
+            set_read_to: bool) -> None:
         sql = """
             UPDATE message_status SET isread = @isread
             WHERE message_status.message_id IN (
@@ -620,7 +648,8 @@ class MsgBoxSQLiteRepository:
 
     def get_message_metadata(self, external_id: str, sequence: int) -> Optional[MessageMetadata]:
         sql = """
-            SELECT message.id, message.fromtoken, message.msg_box_id, message.seq, message.receivedts, message.contenttype
+            SELECT message.id, message.fromtoken, message.msg_box_id, 
+                message.seq, message.receivedts, message.contenttype
             FROM message
             INNER JOIN message_status ON message_status.message_id = message.id
             INNER JOIN msg_box ON message.msg_box_id = msg_box.id
@@ -641,7 +670,8 @@ class MsgBoxSQLiteRepository:
             )
 
     def delete_message(self, message_id: int):
-        sql = "UPDATE message_status SET isdeleted = true WHERE message_id = @message_id RETURNING id;"
+        sql = "UPDATE message_status SET isdeleted = true " \
+              "WHERE message_id = @message_id RETURNING id;"
         params = (message_id,)
         rows = self.db.execute(sql, params)
         count_deleted = len(rows)

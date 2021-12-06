@@ -29,7 +29,7 @@ from typing import Any, Set, List, NamedTuple, Optional, Tuple
 from .constants import AccountFlags, ChannelState
 from .msg_box.utils import create_account_api_token
 
-"""
+_ = """
 Useful regexes for searching codebase:
 - create.*_table -> finds all table creation functions
 """
@@ -288,12 +288,14 @@ class SQLiteDatabase(SQLiteDatabaseBase):
         """
         self.execute(sql)
 
-    def create_account(self, public_key_bytes: bytes, forced_api_key: Optional[str] = None) -> Tuple[int, str]:
+    def create_account(self, public_key_bytes: bytes,
+            forced_api_key: Optional[str] = None) -> Tuple[int, str]:
         sql = """
         INSERT INTO accounts (public_key_bytes, api_key) VALUES (?, ?)
         """
         if forced_api_key:
-            api_key = forced_api_key  # Should ONLY be used for REGTEST_VALID_ACCOUNT_TOKEN
+            # Should only be used for REGTEST_VALID_ACCOUNT_TOKEN
+            api_key = forced_api_key
         else:
             api_key = create_account_api_token()
         cursor = self.execute2(sql, (public_key_bytes, api_key))

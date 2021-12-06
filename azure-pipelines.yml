@@ -38,7 +38,7 @@ jobs:
     - script: |
         set -e
         python3 -m pip install -U pylint
-        python3 -m pylint --rcfile ./.pylintrc ./electrumsv_sdk
+        python3 -m pylint --rcfile ./.pylintrc ./esv_reference_server
         if [ $? -gt 0 ]
         then
           # https://docs.pylint.org/en/1.6.0/run.html#exit-codes

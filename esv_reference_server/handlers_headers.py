@@ -29,7 +29,8 @@ async def get_header(request: web.Request) -> web.Response:
             request_headers = {'Content-Type': 'application/octet-stream'}  # Should be 'Accept'
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.read()
-            response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
+            response_headers = {'Content-Type': 'application/octet-stream',
+                                'User-Agent': 'ESV-Ref-Server'}
             return web.Response(body=result, status=200, reason='OK', headers=response_headers)
 
         # else: application/json
@@ -56,7 +57,8 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
     count = params.get('count', '1')
 
     try:
-        url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/byHeight?height={height}&count={count}"
+        url_to_fetch = \
+            f"{app_state.header_sv_url}/api/v1/chain/header/byHeight?height={height}&count={count}"
         if accept_type == 'application/octet-stream':
             request_headers = {'Accept': 'application/octet-stream'}
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
@@ -64,7 +66,8 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
                     return web.Response(reason=response.reason, status=response.status)
 
                 result = await response.read()
-            response_headers = {'Content-Type': 'application/octet-stream', 'User-Agent': 'ESV-Ref-Server'}
+            response_headers = {'Content-Type': 'application/octet-stream',
+                                'User-Agent': 'ESV-Ref-Server'}
             return web.Response(body=result, status=200, reason='OK', headers=response_headers)
 
         # else: application/json
@@ -161,7 +164,8 @@ class HeadersWebSocket(web.View):
         async for msg in client.websocket:
             # Ignore all messages from client
             if msg.type == aiohttp.WSMsgType.text:
-                self.logger.debug('%s new headers websocket client sent: %s', client.ws_id, msg.data)
+                self.logger.debug('%s new headers websocket client sent: %s',
+                                  client.ws_id, msg.data)
                 # request_json = json.loads(msg.data)
                 # response_json = json.dumps(request_json)
                 # await client.websocket.send_str(response_json)

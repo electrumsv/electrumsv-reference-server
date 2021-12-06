@@ -47,13 +47,13 @@ async def get_account(request: web.Request) -> web.Response:
     auth_string = request.headers.get('Authorization', None)
     if auth_string is not None:
         if not auth_string.startswith("Bearer "):
-            raise web.Response(reason="Invalid API key", status=400)
+            raise web.HTTPBadRequest(reason="Invalid API key")
 
         api_key = auth_string[7:]
         account_id, account_flags = db.get_account_id_for_api_key(api_key)
     else:
         if not request.body_exists:
-            raise web.Response(reason="Body required", status=400)
+            raise web.HTTPBadRequest(reason="Body required")
 
         key_data: VerifiableKeyData = await request.json()
         if not verify_key_data(key_data):

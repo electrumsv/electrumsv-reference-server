@@ -180,8 +180,8 @@ class ApplicationState(object):
                     if ws_client.msg_box_internal_id == notification.msg_box.id:
                         msg = json.dumps(notification.notification_new_message_text)
 
-                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_json(notification.to_dict()),
-                        self.loop)
+                    asyncio.run_coroutine_threadsafe(
+                        ws_client.websocket.send_json(notification.to_dict()), self.loop)
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
         finally:
@@ -191,9 +191,7 @@ class ApplicationState(object):
 async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
     """
     Cleanup context async generator to create and properly close aiohttp ClientSession
-
     Ref.:
-
         > https://docs.aiohttp.org/en/stable/web_advanced.html#cleanup-context
         > https://docs.aiohttp.org/en/stable/web_advanced.html#aiohttp-web-signals
         > https://docs.aiohttp.org/en/stable/web_advanced.html#data-sharing-aka-no-singletons-please
@@ -242,12 +240,16 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
 
     if network == network.REGTEST:
         # TODO(temporary-prototype-choice) Allow regtest key override or fallback to these?
-        REGTEST_VALID_ACCOUNT_TOKEN = os.getenv('REGTEST_VALID_ACCOUNT_TOKEN', "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==")
-        REGTEST_CLIENT_PRIVATE_KEY = os.getenv('REGTEST_CLIENT_PRIVATE_KEY', '720f1987db69efa562b3dabd78e51f19bd8da76c70ad839b72b939f4071b144b')
+        REGTEST_VALID_ACCOUNT_TOKEN = os.getenv('REGTEST_VALID_ACCOUNT_TOKEN',
+                                                "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xa"
+                                                "CbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==")
+        REGTEST_CLIENT_PRIVATE_KEY = os.getenv('REGTEST_CLIENT_PRIVATE_KEY',
+                                               '720f1987db69efa562b3dabd78e51f19'
+                                               'bd8da76c70ad839b72b939f4071b144b')
         client_priv_key = bitcoinx.PrivateKey.from_hex(REGTEST_CLIENT_PRIVATE_KEY)
         client_pub_key: bitcoinx.PublicKey = client_priv_key.public_key
-        account_id, api_key = app_state.sqlite_db.create_account(client_pub_key.to_bytes(),
-            forced_api_key=REGTEST_VALID_ACCOUNT_TOKEN)
+        account_id, api_key = app_state.sqlite_db.create_account(
+            client_pub_key.to_bytes(), forced_api_key=REGTEST_VALID_ACCOUNT_TOKEN)
         logger.debug(f"Got RegTest account_id: {account_id}, api_key: {api_key}")
         app_state.server_keys = create_regtest_server_keys()
     else:
@@ -271,45 +273,72 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     # 'auth_required' information is only used by unit-testing at the moment to assert that auth
     # checks are being done
     app.routes = [
-        Route(web.get("/", handlers.ping), auth_required=False),
-        Route(web.get("/api/v1/endpoints", handlers.get_endpoints_data), auth_required=False),
+        Route(web.get("/",
+                      handlers.ping), False),
+        Route(web.get("/api/v1/endpoints",
+                      handlers.get_endpoints_data), False),
 
         # Payment Channel Account Management
-        Route(web.get("/api/v1/account", handlers.get_account), auth_required=True),
-        Route(web.post("/api/v1/account/key", handlers.post_account_key), auth_required=True),
-        Route(web.post("/api/v1/account/channel", handlers.post_account_channel), auth_required=True),
-        Route(web.put("/api/v1/account/channel", handlers.put_account_channel_update), auth_required=True),
-        Route(web.delete("/api/v1/account/channel", handlers.delete_account_channel), auth_required=True),
-        Route(web.post("/api/v1/account/funding", handlers.post_account_funding), auth_required=True),
+        Route(web.get("/api/v1/account",
+                      handlers.get_account), True),
+        Route(web.post("/api/v1/account/key",
+                       handlers.post_account_key), True),
+        Route(web.post("/api/v1/account/channel",
+                       handlers.post_account_channel), True),
+        Route(web.put("/api/v1/account/channel",
+                      handlers.put_account_channel_update), True),
+        Route(web.delete("/api/v1/account/channel",
+                         handlers.delete_account_channel), True),
+        Route(web.post("/api/v1/account/funding",
+                       handlers.post_account_funding), True),
 
         # Message Box Management (i.e. Custom Peer Channels implementation)
-        Route(web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels, allow_head=False), auth_required=True),
-        Route(web.get("/api/v1/channel/manage/{channelid}", msg_box.controller.get_single_channel_details), auth_required=True),
-        Route(web.post("/api/v1/channel/manage/{channelid}", msg_box.controller.update_single_channel_properties), auth_required=True),
-        Route(web.delete("/api/v1/channel/manage/{channelid}", msg_box.controller.delete_channel), auth_required=True),
-        Route(web.post("/api/v1/channel/manage", msg_box.controller.create_new_channel), auth_required=True),
-        Route(web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", msg_box.controller.get_token_details), auth_required=True),
-        Route(web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}", msg_box.controller.revoke_selected_token), auth_required=True),
-        Route(web.get("/api/v1/channel/manage/{channelid}/api-token", msg_box.controller.get_list_of_tokens), auth_required=True),
-        Route(web.post("/api/v1/channel/manage/{channelid}/api-token", msg_box.controller.create_new_token_for_channel), auth_required=True),
+        Route(web.get("/api/v1/channel/manage/list",
+                      msg_box.controller.list_channels, allow_head=False), True),
+        Route(web.get("/api/v1/channel/manage/{channelid}",
+                      msg_box.controller.get_single_channel_details), True),
+        Route(web.post("/api/v1/channel/manage/{channelid}",
+                       msg_box.controller.update_single_channel_properties), True),
+        Route(web.delete("/api/v1/channel/manage/{channelid}",
+                         msg_box.controller.delete_channel), True),
+        Route(web.post("/api/v1/channel/manage",
+                       msg_box.controller.create_new_channel), True),
+        Route(web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
+                      msg_box.controller.get_token_details), True),
+        Route(web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
+                         msg_box.controller.revoke_selected_token), True),
+        Route(web.get("/api/v1/channel/manage/{channelid}/api-token",
+                      msg_box.controller.get_list_of_tokens), True),
+        Route(web.post("/api/v1/channel/manage/{channelid}/api-token",
+                       msg_box.controller.create_new_token_for_channel), True),
 
         # Message Box Push / Pull API
-        Route(web.post("/api/v1/channel/{channelid}", msg_box.controller.write_message), auth_required=True),
+        Route(web.post("/api/v1/channel/{channelid}",
+                       msg_box.controller.write_message), True),
         # web.head is added automatically by web.get in aiohttp
-        Route(web.get("/api/v1/channel/{channelid}", msg_box.controller.get_messages), auth_required=True),
-        Route(web.post("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.mark_message_read_or_unread), auth_required=True),
-        Route(web.delete("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.delete_message), auth_required=True),
+        Route(web.get("/api/v1/channel/{channelid}",
+                      msg_box.controller.get_messages), True),
+        Route(web.post("/api/v1/channel/{channelid}/{sequence}",
+                       msg_box.controller.mark_message_read_or_unread), True),
+        Route(web.delete("/api/v1/channel/{channelid}/{sequence}",
+                         msg_box.controller.delete_message), True),
 
         # Message Box Websocket API
-        Route(web.view("/api/v1/channel/{channelid}/notify", MsgBoxWebSocket), auth_required=True),
+        Route(web.view("/api/v1/channel/{channelid}/notify",
+                       MsgBoxWebSocket), True),
     ]
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         app.routes.extend([
-            Route(web.get("/api/v1/headers/by-height", handlers_headers.get_headers_by_height), auth_required=True),
-            Route(web.get("/api/v1/headers/{hash}", handlers_headers.get_header), auth_required=False),
-            Route(web.get("/api/v1/chain/tips", handlers_headers.get_chain_tips), auth_required=False),
-            Route(web.view("/api/v1/chain/tips/websocket", HeadersWebSocket), auth_required=False),
-            Route(web.get("/api/v1/network/peers", handlers_headers.get_peers), auth_required=False),
+            Route(web.get("/api/v1/headers/by-height",
+                          handlers_headers.get_headers_by_height), True),
+            Route(web.get("/api/v1/headers/{hash}",
+                          handlers_headers.get_header), False),
+            Route(web.get("/api/v1/chain/tips",
+                          handlers_headers.get_chain_tips), False),
+            Route(web.view("/api/v1/chain/tips/websocket",
+                           HeadersWebSocket), False),
+            Route(web.get("/api/v1/network/peers",
+                          handlers_headers.get_peers), False),
         ])
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
