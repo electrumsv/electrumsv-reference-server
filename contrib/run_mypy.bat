@@ -7,4 +7,5 @@ SET ScriptDir=%~dp0
 SET SdkDir=%ScriptDir%\..
 echo %ScriptDir%
 cd %ScriptDir%
+mypy --install-types --non-interactive
 mypy --config=%SdkDir%\mypy.ini %SdkDir%\esv_reference_server

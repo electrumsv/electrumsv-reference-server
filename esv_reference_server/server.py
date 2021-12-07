@@ -45,10 +45,19 @@ requests_logger = logging.getLogger("urllib3")
 requests_logger.setLevel(logging.WARNING)
 
 
+class AiohttpApplication(web.Application):
+
+    def __init__(self):
+        super().__init__()
+        self.is_alive: bool = False
+        self.routes: list[Route] = []
+        self.API_ROUTE_DEFS: dict[str, EndpointInfo] = {}
+
+
 class ApplicationState(object):
     server_keys: ServerKeys
 
-    def __init__(self, app: web.Application, loop: asyncio.AbstractEventLoop,
+    def __init__(self, app: AiohttpApplication, loop: asyncio.AbstractEventLoop,
             network: Network, datastore_location: Path) -> None:
         self.logger = logging.getLogger('app_state')
         self.app = app
@@ -60,8 +69,7 @@ class ApplicationState(object):
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue = queue.Queue()  # json only
-        self.subscriptions_cache = {}  # msg_box_id: NotificationSubscription
+        self.msg_box_new_msg_queue: queue.Queue = queue.Queue()  # json only
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
@@ -98,10 +106,14 @@ class ApplicationState(object):
                     request_headers = {'Accept': 'application/json'}
                     result = requests.get(url_to_fetch, request_headers)
                     result.raise_for_status()
+
                     longest_chain_tip = None
                     for tip in result.json():
                         if tip['state'] == "LONGEST_CHAIN":
                             longest_chain_tip = tip
+
+                    if not longest_chain_tip:  # should never happen
+                        raise ValueError("No longest chain tip in response")
 
                     if current_best_hash != longest_chain_tip['header']['hash']:
                         self.logger.debug(f"Got new chain tip: {longest_chain_tip}")
@@ -234,7 +246,7 @@ async def multipart_mixed(request: web.Request) \
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
         port: int = SERVER_PORT) -> tuple[Application, str, int]:
     loop = asyncio.get_event_loop()
-    app = web.Application()
+    app = AiohttpApplication()
     app.cleanup_ctx.append(client_session_ctx)
     app_state = ApplicationState(app, loop, network, datastore_location)
 
@@ -352,7 +364,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app.port = port
     app.API_ROUTE_DEFS = {}
     for route in app.routes:
-        route_def: web.RouteDef = route.aiohttp_route_def
+        route_def = route.aiohttp_route_def
         auth_required = route.auth_required  # Bearer Token
         app.API_ROUTE_DEFS[route_def.handler.__name__] = EndpointInfo(route_def.method,
             BASE_URL + route_def.path, auth_required)
@@ -362,6 +374,6 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
 
 if __name__ == "__main__":
     DEFAULT_DATASTORE_LOCATION = MODULE_DIR.parent / 'esv_reference_server.sqlite'
-    datastore_location = os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION)
-    app = get_aiohttp_app(Network.REGTEST, datastore_location)
+    datastore_location = Path(os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION))
+    app, host, port = get_aiohttp_app(Network.REGTEST, datastore_location)
     web.run_app(app, host=SERVER_HOST, port=SERVER_PORT)

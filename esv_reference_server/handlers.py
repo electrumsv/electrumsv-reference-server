@@ -157,6 +157,7 @@ async def post_account_key(request: web.Request) -> web.Response:
     assert payment_key_index > 0
     payment_key_bytes = generate_payment_public_key(server_keys.identity_public_key,
         account_public_key_bytes, payment_key_index).to_bytes()
+    assert payment_key_bytes is not None
     db.create_account_payment_channel(account_id, payment_key_index, payment_key_bytes)
 
     mpwriter = aiohttp.MultipartWriter()

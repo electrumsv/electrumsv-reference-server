@@ -9,7 +9,7 @@ from datetime import datetime
 from esv_reference_server.msg_box.models import MsgBox
 
 
-@dataclass(slots=True)  # slots=True support was added in python 3.10.x
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class RetentionViewModel:
     min_age_days: int
     max_age_days: int
@@ -48,7 +48,7 @@ class MsgBoxAPITokenViewModelGet:
         }
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class MsgBoxViewModelCreate:
     public_read: bool
     public_write: bool
@@ -65,7 +65,7 @@ class MsgBoxViewModelCreate:
         )
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class MsgBoxViewModelAmend:
     public_read: bool
     public_write: bool
@@ -87,7 +87,7 @@ class MsgBoxViewModelAmend:
     }
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class MsgBoxViewModelGet:
     external_id: str
     href: str
@@ -127,14 +127,14 @@ class MsgBoxViewModelGet:
             api_tokens=api_tokens)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class APITokenViewModelCreate:
     description: str
     can_read: bool
     can_write: bool
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class APITokenViewModelGet:
     id: str
     token: str
@@ -152,7 +152,7 @@ class APITokenViewModelGet:
         }
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class MessageViewModelGet:
     sequence: int
     received: datetime
