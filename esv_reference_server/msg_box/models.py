@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import NamedTuple, Optional
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
 class MsgBoxAPIToken:
     id: int
     account_id: int
@@ -59,6 +59,7 @@ class MsgBoxAPITokenRow(NamedTuple):
     canread: bool
     canwrite: bool
     validfrom: datetime
+    validto: Optional[datetime]
 
 
 class Message(NamedTuple):

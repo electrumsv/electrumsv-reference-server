@@ -169,8 +169,8 @@ async def mapi_broadcast_transaction(network: Network, transaction_bytes: bytes)
             envelope = cast(JSONEnvelope, json.loads(envelope_text))
             validate_json_envelope(server_data, envelope)
 
-    response = cast(MAPIBroadcastResponse, json.loads(envelope["payload"]))
-    if response["returnResult"] == "failure":
-        raise MAPIBroadcastFailureError(response["returnDescription"])
+    response_json = cast(MAPIBroadcastResponse, json.loads(envelope["payload"]))
+    if response_json["returnResult"] == "failure":
+        raise MAPIBroadcastFailureError(response_json["returnDescription"])
 
     return envelope_text

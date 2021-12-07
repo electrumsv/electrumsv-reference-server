@@ -148,10 +148,10 @@ class HeadersWebSocket(web.View):
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.read()
                 self.logger.debug(f"Sending tip to new websocket connection, ws_id: {client.ws_id}")
-                response = bytearray()
-                response += result  # 80 byte header
-                response += bitcoinx.pack_be_uint32(current_best_height)
-                await client.websocket.send_bytes(response)
+                response_bytes = bytearray()
+                response_bytes += result  # 80 byte header
+                response_bytes += bitcoinx.pack_be_uint32(current_best_height)
+                await client.websocket.send_bytes(response_bytes)
         except aiohttp.ClientConnectorError as e:
             # When HeaderSV comes back online there will be a compensating chain tip notification
             self.logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")

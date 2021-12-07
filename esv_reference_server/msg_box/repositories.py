@@ -135,7 +135,7 @@ class MsgBoxSQLiteRepository:
             msg_box_view_amend.public_write, msg_box_view_amend.locked, external_id))
 
         if not result:
-            return
+            return None
 
         return msg_box_view_amend
 
@@ -177,6 +177,7 @@ class MsgBoxSQLiteRepository:
                 canread=True,
                 canwrite=True,
                 validfrom=datetime.utcnow(),
+                validto=None
             )
             cur = self.create_msg_box_api_token(cur, msg_box_api_token_row)
             id, account_id, msg_box_id, token, description, \
@@ -213,14 +214,26 @@ class MsgBoxSQLiteRepository:
             VALUES(@account_id, @msg_box_id, @token, @description, @canread, @canwrite, @validfrom)
             RETURNING *;
         """
-        return cur.execute(sql, msg_box_api_token_row)
+        account_id, msg_box_externalid, token, description, canread, canwrite, validfrom, \
+            validto = msg_box_api_token_row
+        return cur.execute(sql, (account_id, msg_box_externalid, token, description, canread,
+                                 canwrite, validfrom))
 
     def get_msg_box_tokens(self, msg_box_id: int) -> list[MsgBoxAPIToken]:
         sql = f"""SELECT * FROM msg_box_api_token WHERE msg_box_id = ?;"""
         rows = self.db.execute(sql, params=(msg_box_id,))
         msg_box_api_tokens = []
+
+        id: int
+        account_id: int
+        msg_box_externalid: str
+        token: str
+        description: str
+        canread: bool
+        canwrite: bool
+        validfrom: datetime
+        validto: datetime
         for row in rows:
-            row: models.MsgBoxAPITokenRow
             id, account_id, msg_box_externalid, token, \
                 description, canread, canwrite, validfrom, validto = row
             msg_api_token = MsgBoxAPIToken(id=id, account_id=account_id, msg_box_id=msg_box_id,
@@ -239,7 +252,7 @@ class MsgBoxSQLiteRepository:
         """
         rows = self.db.execute(sql, params=(account_id, externalid))
         if len(rows) == 0:
-            return
+            return None
 
         id, account_id, externalid, publicread, publicwrite, locked, \
             sequenced, minagedays, maxagedays, autoprune, head_message_sequence = rows[0]
@@ -280,7 +293,7 @@ class MsgBoxSQLiteRepository:
             msg_boxes.append(msg_box)
         return msg_boxes
 
-    def delete_msg_box(self, msg_box_id: str) -> Optional[bool]:
+    def delete_msg_box(self, msg_box_id: str) -> bool:
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()
         cur.execute('BEGIN')
@@ -289,7 +302,7 @@ class MsgBoxSQLiteRepository:
             selectChannelByExternalId = "SELECT id FROM msg_box WHERE externalid = @msg_box_id;"
             result = cur.execute(selectChannelByExternalId, (msg_box_id,)).fetchone()
             if not result:
-                return
+                return False
 
             msg_box_id = result[0]
             # Peer Channels C# Reference evicts tokens from the cache and runs this query first:
@@ -309,6 +322,7 @@ class MsgBoxSQLiteRepository:
             for sql in statements:
                 cur.execute(sql, (msg_box_id,))
             cur.execute("COMMIT")
+            return True
         except Exception:
             cur.execute("ROLLBACK")
             if sql:
@@ -320,7 +334,7 @@ class MsgBoxSQLiteRepository:
             self.db.release_connection(connection)
 
     def create_api_token(self, api_token_view_model_create: view_models.APITokenViewModelCreate,
-            msg_box_id: int, account_id: int) -> APITokenViewModelGet:
+            msg_box_id: int, account_id: int) -> Optional[APITokenViewModelGet]:
         token = utils.create_channel_api_token()
 
         sql = """
@@ -341,8 +355,9 @@ class MsgBoxSQLiteRepository:
                 description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
                 can_read=canread, can_write=canwrite)
+        return None
 
-    def get_api_token_by_id(self, token_id: int) -> APITokenViewModelGet:
+    def get_api_token_by_id(self, token_id: int) -> Optional[APITokenViewModelGet]:
         sql = "SELECT * FROM msg_box_api_token " \
               "WHERE id = @token_id and (validto IS NULL OR validto >= @validto);"
         params = (token_id, datetime.utcnow())
@@ -352,9 +367,10 @@ class MsgBoxSQLiteRepository:
                 description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
                 can_read=canread, can_write=canwrite)
+        return None
 
     # Todo - Add an LRU cache for this request
-    def get_api_token(self, token: str) -> MsgBoxAPIToken:
+    def get_api_token(self, token: str) -> Optional[MsgBoxAPIToken]:
         sql = "SELECT * FROM msg_box_api_token " \
               "WHERE token = @token and (validto IS NULL OR validto >= @validto);"
         params = (token, datetime.utcnow())
@@ -364,8 +380,9 @@ class MsgBoxSQLiteRepository:
                 canread, canwrite, validfrom, validto = rows[0]
             return MsgBoxAPIToken(id, account_id, msg_box_id,
                 token, description, canread, canwrite, validfrom, validto)
+        return None
 
-    def get_api_tokens(self, external_id: str, token: Optional[str]) \
+    def get_api_tokens(self, external_id: str, token: Optional[str]=None) \
             -> Optional[list[APITokenViewModelGet]]:
         sql = """
         SELECT msg_box_api_token.*
@@ -382,10 +399,12 @@ class MsgBoxSQLiteRepository:
             for row in rows:
                 id, account_id, msg_box_id, token, description, canread, canwrite, \
                     validfrom, validto = row
+                assert token is not None
                 view = APITokenViewModelGet(id=id, token=token, description=description,
                     can_read=canread, can_write=canwrite)
                 result.append(view.to_dict())
             return result
+        return None
 
     def delete_api_token(self, token_id):
         sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
@@ -451,9 +470,9 @@ class MsgBoxSQLiteRepository:
                 WHERE msg_box_id = @msg_box_id
                 RETURNING * ;
             """
-            params = (message.msg_box_api_token_id, message.msg_box_id, message.received_ts,
+            params2 = (message.msg_box_api_token_id, message.msg_box_id, message.received_ts,
                 message.content_type, message.payload)
-            rows = cur.execute(sql, params).fetchall()
+            rows = cur.execute(sql, params2).fetchall()
             if len(rows) != 0:
                 message_id, fromtoken, msg_box_id, seq, receivedts, contenttype, payload = rows[0]
                 message_view_model_get = view_models.MessageViewModelGet(sequence=seq,
@@ -476,8 +495,8 @@ class MsgBoxSQLiteRepository:
                 FROM msg_box_api_token
                 WHERE validto IS NULL AND msg_box_id = @msg_box_id
             """
-            params = (message_id, fromtoken, msg_box_id)
-            cur.execute(sql, params)
+            params3 = (message_id, fromtoken, msg_box_id)
+            cur.execute(sql, params3)
             cur.execute("COMMIT")
             return message_id, message_view_model_get
         except Exception as error:
@@ -553,7 +572,7 @@ class MsgBoxSQLiteRepository:
             if len(rows) != 0:
                 sequenced = rows[0][0]
             else:
-                return
+                return None
 
             if sequenced:
                 sql = """
@@ -562,8 +581,8 @@ class MsgBoxSQLiteRepository:
                     INNER JOIN message_status ON message_status.message_id = message.id
                     WHERE message_status.token_id = @tokenid AND NOT message_status.isdeleted;
                 """
-                params = (api_token_id,)
-                rows = cur.execute(sql, params).fetchall()
+                params2 = (api_token_id,)
+                rows = cur.execute(sql, params2).fetchall()
                 if len(rows) != 0:
                     max_seq = rows[0][0]
                     if max_seq is None:
@@ -571,7 +590,7 @@ class MsgBoxSQLiteRepository:
                 else:
                     max_seq = ""
             else:
-                return
+                return None
 
             sql = """
                 SELECT message.*
@@ -583,19 +602,18 @@ class MsgBoxSQLiteRepository:
                     AND (message_status.isread = false OR @onlyunread = false)
                 ORDER BY message.seq;
             """
-            params = (api_token_id, onlyunread)
-            rows = cur.execute(sql, params).fetchall()
+            params3 = (api_token_id, onlyunread)
+            rows = cur.execute(sql, params3).fetchall()
             cur.execute("COMMIT")
 
             messages = []
             if len(rows) != 0:
+                sequence: int
+                received: datetime
+                content_type: str
+                payload: bytes
                 for row in rows:
                     id, fromtoken, msg_box_id, seq, receivedts, contenttype, payload = row
-
-                    sequence: int
-                    received: datetime
-                    content_type: str
-                    payload: bytes
 
                     message = view_models.MessageViewModelGet(
                         sequence=seq,
@@ -668,6 +686,7 @@ class MsgBoxSQLiteRepository:
                 content_type=contenttype,
                 received_ts=datetime.fromisoformat(receivedts)
             )
+        return None
 
     def delete_message(self, message_id: int):
         sql = "UPDATE message_status SET isdeleted = true " \
