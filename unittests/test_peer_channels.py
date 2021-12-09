@@ -17,7 +17,8 @@ import requests
 from esv_reference_server.errors import Error
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from server import logger, AiohttpServer, get_app
-from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth
+from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
+    API_ROUTE_DEFS, app
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 52462
@@ -67,34 +68,9 @@ class TestAiohttpRESTAPI:
 
     @classmethod
     def setup_class(self) -> None:
-        os.environ['SKIP_DOTENV_FILE'] = '1'
-        os.environ['REFERENCE_SERVER_RESET'] = '1'
-        os.environ['DATASTORE_LOCATION'] = str(MODULE_DIR.joinpath("test_sqlite.sqlite"))
-        os.environ['NOTIFICATION_TEXT_NEW_MESSAGE'] = 'New message arrived'
-        os.environ['MAX_MESSAGE_CONTENT_LENGTH'] = '65536'
-        os.environ['CHUNKED_BUFFER_SIZE'] = '1024'
-
-        self.app, host, port = get_app(TEST_HOST, TEST_PORT)
-        self.API_ROUTE_DEFS = self.app.API_ROUTE_DEFS
-        # for route in self.API_ROUTE_DEFS.items():
-        #     print(route)
-
-        thread = threading.Thread(target=electrumsv_reference_server_thread, args=(self.app, host, port),
-            daemon=True)
-        thread.start()
-
         self.logger = logging.getLogger("TestAiohttpRESTAPI")
         logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
             level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
-
-        sqlite_db: SQLiteDatabase = self.app['app_state'].sqlite_db
-        self.account_id, api_key = sqlite_db.create_account(
-            public_key_bytes=PUBLIC_KEY_1.to_bytes())
-        assert self.account_id == 2
-        assert len(base64.urlsafe_b64decode(api_key)) == 64
-        assert isinstance(api_key, str)
-        global TEST_MASTER_BEARER_TOKEN
-        TEST_MASTER_BEARER_TOKEN = api_key
 
     def setup_method(self) -> None:
         pass
@@ -144,12 +120,12 @@ class TestAiohttpRESTAPI:
                 return await resp.json()
 
     def test_ping(self):
-        route = self.API_ROUTE_DEFS['ping']
+        route = API_ROUTE_DEFS['ping']
         result = requests.get(route.url)
         assert result.text is not None
 
     def test_create_new_channel(self):
-        route = self.API_ROUTE_DEFS['create_new_channel']
+        route = API_ROUTE_DEFS['create_new_channel']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -195,7 +171,7 @@ class TestAiohttpRESTAPI:
         assert single_channel_data['access_tokens'][0]['can_write'] is True
 
     def test_create_new_token_for_channel(self):
-        route = self.API_ROUTE_DEFS['create_new_token_for_channel']
+        route = API_ROUTE_DEFS['create_new_token_for_channel']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -230,7 +206,7 @@ class TestAiohttpRESTAPI:
         assert response_body == expected_response_body
 
     def test_list_channels(self):
-        route = self.API_ROUTE_DEFS['list_channels']
+        route = API_ROUTE_DEFS['list_channels']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -265,7 +241,7 @@ class TestAiohttpRESTAPI:
             assert single_channel_data['access_tokens'][0]['can_write'] is True
 
     def test_get_single_channel_details(self):
-        route = self.API_ROUTE_DEFS['get_single_channel_details']
+        route = API_ROUTE_DEFS['get_single_channel_details']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -296,7 +272,7 @@ class TestAiohttpRESTAPI:
         assert single_channel_data['access_tokens'][0]['can_write'] is True
 
     def test_update_single_channel_properties(self):
-        route = self.API_ROUTE_DEFS['update_single_channel_properties']
+        route = API_ROUTE_DEFS['update_single_channel_properties']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -325,7 +301,7 @@ class TestAiohttpRESTAPI:
             "can_read": True,
             "can_write": False
         }
-        route = self.API_ROUTE_DEFS['get_token_details']
+        route = API_ROUTE_DEFS['get_token_details']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -361,7 +337,7 @@ class TestAiohttpRESTAPI:
             }
         ]
 
-        route = self.API_ROUTE_DEFS['get_list_of_tokens']
+        route = API_ROUTE_DEFS['get_list_of_tokens']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -382,7 +358,7 @@ class TestAiohttpRESTAPI:
     # MESSAGE MANAGEMENT APIS - USE CHANNEL-SPECIFIC BEARER TOKEN NOW
 
     def test_write_message_no_content_type_should_raise_400(self):
-        route = self.API_ROUTE_DEFS['write_message']
+        route = API_ROUTE_DEFS['write_message']
         request_body = {"key": "value"}
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_write_message_no_content_type_should_raise_400 url: {url}")
@@ -398,7 +374,7 @@ class TestAiohttpRESTAPI:
             "key": "value"
         }
 
-        route = self.API_ROUTE_DEFS['write_message']
+        route = API_ROUTE_DEFS['write_message']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -419,7 +395,7 @@ class TestAiohttpRESTAPI:
             "key": "value"
         }
 
-        route = self.API_ROUTE_DEFS['write_message']
+        route = API_ROUTE_DEFS['write_message']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -439,7 +415,7 @@ class TestAiohttpRESTAPI:
         assert response_body['payload'] == {'key': 'value'}
 
     def test_get_messages_head(self):
-        route = self.API_ROUTE_DEFS['get_messages']
+        route = API_ROUTE_DEFS['get_messages']
         if route.auth_required:
             _no_auth(route.url, method='head')
             _wrong_auth_type(route.url, method='head')
@@ -453,7 +429,7 @@ class TestAiohttpRESTAPI:
         assert result.content == b''
 
     def test_get_messages_unread_should_get_one(self):
-        route = self.API_ROUTE_DEFS['get_messages']
+        route = API_ROUTE_DEFS['get_messages']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -473,7 +449,7 @@ class TestAiohttpRESTAPI:
         assert response_body[0]['payload'] == {'key': 'value'}
 
     def test_mark_message_read_or_unread(self):
-        route = self.API_ROUTE_DEFS['mark_message_read_or_unread']
+        route = API_ROUTE_DEFS['mark_message_read_or_unread']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -495,7 +471,7 @@ class TestAiohttpRESTAPI:
         assert result.reason is not None
 
     def test_delete_message_read_only_token_should_fail(self):
-        route = self.API_ROUTE_DEFS['delete_message']
+        route = API_ROUTE_DEFS['delete_message']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -515,7 +491,7 @@ class TestAiohttpRESTAPI:
         assert result.reason is not None
 
     def test_delete_message_should_succeed(self):
-        route = self.API_ROUTE_DEFS['delete_message']
+        route = API_ROUTE_DEFS['delete_message']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -552,17 +528,19 @@ class TestAiohttpRESTAPI:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             content = json.loads(msg.data)
                             self.logger.info(f'New message from msg box: {content}')
+
+                            if isinstance(content, dict) and content.get('error'):
+                                error: Error = Error.from_websocket_dict(content)
+                                self.logger.info(f"Websocket error: {error}")
+                                if error.status == web.HTTPUnauthorized.status_code:
+                                    raise web.HTTPUnauthorized()
+
                             count += 1
                             if expected_count == count:
                                 self.logger.debug(f"Received all {expected_count} messages")
                                 await session.close()
                                 completion_event.set()
                                 return
-                            if isinstance(content, dict) and content.get('error'):
-                                error: Error = Error.from_websocket_dict(content)
-                                self.logger.info(f"Websocket error: {error}")
-                                if error.status == web.HTTPUnauthorized.status_code:
-                                    raise web.HTTPUnauthorized()
 
                         if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR,
                                         aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
@@ -600,7 +578,7 @@ class TestAiohttpRESTAPI:
         asyncio.run(main())
 
     def test_revoke_selected_token(self):
-        route = self.API_ROUTE_DEFS['revoke_selected_token']
+        route = API_ROUTE_DEFS['revoke_selected_token']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -616,7 +594,7 @@ class TestAiohttpRESTAPI:
         assert result.status_code == web.HTTPNoContent.status_code
 
     def test_expired_token_should_fail(self):
-        route = self.API_ROUTE_DEFS['get_token_details']
+        route = API_ROUTE_DEFS['get_token_details']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -632,7 +610,7 @@ class TestAiohttpRESTAPI:
         assert result.status_code == 401
 
     def test_delete_channel(self):
-        route = self.API_ROUTE_DEFS['delete_channel']
+        route = API_ROUTE_DEFS['delete_channel']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
@@ -650,7 +628,7 @@ class TestAiohttpRESTAPI:
             request_body, good_bearer_token)
 
         assert result.status_code == web.HTTPNoContent.status_code
-        sqlite_db: SQLiteDatabase = self.app['app_state'].sqlite_db
+        sqlite_db: SQLiteDatabase = app['app_state'].sqlite_db
         sql = """SELECT * FROM msg_box"""
         rows = sqlite_db.execute(sql)
         assert len(rows) == 0
