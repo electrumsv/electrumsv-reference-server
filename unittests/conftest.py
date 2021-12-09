@@ -23,8 +23,8 @@ def _wrong_auth_type(url: str, method: str):
     assert result.reason is not None
 
 
-def _unauthorized(url: str, method: str, headers: Optional[dict] = None,
-                  body: Optional[dict] = None):
+def _bad_token(url: str, method: str, headers: Optional[dict] = None,
+               body: Optional[dict] = None):
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     if not headers:

@@ -17,7 +17,7 @@ import requests
 from esv_reference_server.errors import Error
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from server import logger, AiohttpServer, get_app
-from unittests.conftest import _wrong_auth_type, _unauthorized, _successful_call, _no_auth
+from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 52462
@@ -36,8 +36,9 @@ MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 CHANNEL_ID: str = ""
 CHANNEL_BEARER_TOKEN: str = ""
+CHANNEL_BEARER_TOKEN_ID: int = 0
 CHANNEL_READ_ONLY_TOKEN: str = ""
-TOKEN_ID: int = 1
+CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 
 
 async def main(app: Application, host: str, port: int):
@@ -152,7 +153,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         request_body = {
             "public_read": True,
@@ -176,6 +177,7 @@ class TestAiohttpRESTAPI:
         single_channel_data = response_body
         global CHANNEL_ID
         global CHANNEL_BEARER_TOKEN
+        global CHANNEL_BEARER_TOKEN_ID
         CHANNEL_ID = single_channel_data['id']
         assert single_channel_data['href'] == f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
@@ -188,15 +190,51 @@ class TestAiohttpRESTAPI:
         assert len(issued_token_bytes) == 64
         assert single_channel_data['access_tokens'][0]['description'] == "Owner"
         CHANNEL_BEARER_TOKEN = single_channel_data['access_tokens'][0]['token']
+        CHANNEL_BEARER_TOKEN_ID = single_channel_data['access_tokens'][0]['id']
         assert single_channel_data['access_tokens'][0]['can_read'] is True
         assert single_channel_data['access_tokens'][0]['can_write'] is True
+
+    def test_create_new_token_for_channel(self):
+        route = self.API_ROUTE_DEFS['create_new_token_for_channel']
+        if route.auth_required:
+            _no_auth(route.url, route.http_method)
+            _wrong_auth_type(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
+
+        request_body = {
+          "description": "some description",
+          "can_read": True,
+          "can_write": False
+        }
+        url = route.url.format(channelid=CHANNEL_ID)
+        self.logger.debug(f"test_create_new_token_for_channel url: {url}")
+        result: requests.Response = _successful_call(url, route.http_method, None,
+            request_body, TEST_MASTER_BEARER_TOKEN)
+
+        assert result.status_code == 200, result.reason
+
+        response_body = result.json()
+        global CHANNEL_READ_ONLY_TOKEN
+        global CHANNEL_READ_ONLY_TOKEN_ID
+        CHANNEL_READ_ONLY_TOKEN_ID = response_body['id']
+        CHANNEL_READ_ONLY_TOKEN = response_body['token']
+
+        assert len(base64.urlsafe_b64decode(response_body['token'])) == 64
+        expected_response_body = {
+            "id": 2,
+            "token": response_body['token'],
+            "description": "some description",
+            "can_read": True,
+            "can_write": False
+        }
+        assert response_body == expected_response_body
 
     def test_list_channels(self):
         route = self.API_ROUTE_DEFS['list_channels']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         request_body = None
         self.logger.debug(f"test_list_channels url: {route.url}")
@@ -231,7 +269,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         request_body = None
         url = route.url.format(channelid=CHANNEL_ID)
@@ -262,7 +300,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         request_body = {
             "public_read": True,
@@ -281,21 +319,20 @@ class TestAiohttpRESTAPI:
 
     def test_get_token_details(self):
         expected_response_body = {
-            "id": 1,
-            "token": CHANNEL_BEARER_TOKEN,
-            "description": "Owner",
+            "id": CHANNEL_READ_ONLY_TOKEN_ID,
+            "token": CHANNEL_READ_ONLY_TOKEN,
+            "description": "some description",
             "can_read": True,
-            "can_write": True
+            "can_write": False
         }
-
         route = self.API_ROUTE_DEFS['get_token_details']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         request_body = None
-        url = route.url.format(channelid=CHANNEL_ID, tokenid=TOKEN_ID)
+        url = route.url.format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         self.logger.debug(f"test_get_token_details url: {url}")
         result: requests.Response = _successful_call(url, route.http_method, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
@@ -309,11 +346,18 @@ class TestAiohttpRESTAPI:
     def test_get_list_of_tokens(self):
         expected_response_body = [
             {
-                "id": 1,
+                "id": CHANNEL_BEARER_TOKEN_ID,
                 "token": CHANNEL_BEARER_TOKEN,
                 "description": "Owner",
                 "can_read": True,
                 "can_write": True
+            },
+            {
+                "id": CHANNEL_READ_ONLY_TOKEN_ID,
+                "token": CHANNEL_READ_ONLY_TOKEN,
+                "description": "some description",
+                "can_read": True,
+                "can_write": False
             }
         ]
 
@@ -321,10 +365,10 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         request_body = None
-        url = route.url.format(channelid=CHANNEL_ID, tokenid=TOKEN_ID)
+        url = route.url.format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         self.logger.debug(f"test_get_list_of_tokens url: {url}")
         result: requests.Response = _successful_call(url, route.http_method, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
@@ -333,39 +377,6 @@ class TestAiohttpRESTAPI:
 
         response_body = result.json()
         self.logger.debug(json.dumps(response_body, indent=4))
-        assert response_body == expected_response_body
-
-    def test_create_new_token_for_channel(self):
-        route = self.API_ROUTE_DEFS['create_new_token_for_channel']
-        if route.auth_required:
-            _no_auth(route.url, route.http_method)
-            _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
-
-        request_body = {
-          "description": "some description",
-          "can_read": True,
-          "can_write": False
-        }
-        url = route.url.format(channelid=CHANNEL_ID)
-        self.logger.debug(f"test_create_new_token_for_channel url: {url}")
-        result: requests.Response = _successful_call(url, route.http_method, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
-
-        assert result.status_code == 200, result.reason
-
-        response_body = result.json()
-        global CHANNEL_READ_ONLY_TOKEN
-        CHANNEL_READ_ONLY_TOKEN = response_body['token']
-
-        assert len(base64.urlsafe_b64decode(response_body['token'])) == 64
-        expected_response_body = {
-            "id": 2,
-            "token": response_body['token'],
-            "description": "some description",
-            "can_read": True,
-            "can_write": False
-        }
         assert response_body == expected_response_body
 
     # MESSAGE MANAGEMENT APIS - USE CHANNEL-SPECIFIC BEARER TOKEN NOW
@@ -391,7 +402,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method, headers, request_body)
+            _bad_token(route.url, route.http_method, headers, request_body)
 
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_write_message_read_only_token_should_fail url: {url}")
@@ -412,7 +423,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method, headers, request_body)
+            _bad_token(route.url, route.http_method, headers, request_body)
 
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_write_message url: {url}")
@@ -432,7 +443,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, method='head')
             _wrong_auth_type(route.url, method='head')
-            _unauthorized(route.url, method='head')
+            _bad_token(route.url, method='head')
 
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_get_messages_head url: {url}")
@@ -446,7 +457,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         query_params = "?unread=true"
         url = route.url.format(channelid=CHANNEL_ID) + query_params
@@ -466,7 +477,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         body = {"read": True}
         sequence = 1
@@ -488,7 +499,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         sequence = 1
         url = route.url.format(channelid=CHANNEL_ID, sequence=sequence)
@@ -508,7 +519,7 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         sequence = 1
         url = route.url.format(channelid=CHANNEL_ID, sequence=sequence)
@@ -574,7 +585,7 @@ class TestAiohttpRESTAPI:
                         assert resp.status == 200, resp.reason
 
         async def main():
-            EXPECTED_MSG_COUNT = 100
+            EXPECTED_MSG_COUNT = 10
             logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
             logger.debug(f"CHANNEL_BEARER_TOKEN: {CHANNEL_BEARER_TOKEN}")
             logger.debug(f"CHANNEL_READ_ONLY_TOKEN: {CHANNEL_READ_ONLY_TOKEN}")
@@ -582,7 +593,7 @@ class TestAiohttpRESTAPI:
             completion_event = asyncio.Event()
             url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
             asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(1)
             asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
             await completion_event.wait()
 
@@ -593,23 +604,39 @@ class TestAiohttpRESTAPI:
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         request_body = None
-        url = route.url.format(channelid=CHANNEL_ID, tokenid=TOKEN_ID)
-        # self.logger.debug(f"test_revoke_selected_token url: {url}")
+        url = route.url.format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
+        self.logger.debug(f"test_revoke_selected_token url: {url}")
         result: requests.Response = _successful_call(url, route.http_method, None,
             request_body, good_bearer_token)
 
         assert result.status_code == web.HTTPNoContent.status_code
+
+    def test_expired_token_should_fail(self):
+        route = self.API_ROUTE_DEFS['get_token_details']
+        if route.auth_required:
+            _no_auth(route.url, route.http_method)
+            _wrong_auth_type(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
+
+        expired_bearer_token = CHANNEL_READ_ONLY_TOKEN
+        request_body = None
+        url = route.url.format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
+        self.logger.debug(f"test_revoke_selected_token url: {url}")
+        result: requests.Response = _successful_call(url, route.http_method, None,
+            request_body, expired_bearer_token)
+
+        assert result.status_code == 401
 
     def test_delete_channel(self):
         route = self.API_ROUTE_DEFS['delete_channel']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
             _wrong_auth_type(route.url, route.http_method)
-            _unauthorized(route.url, route.http_method)
+            _bad_token(route.url, route.http_method)
 
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         request_body = {

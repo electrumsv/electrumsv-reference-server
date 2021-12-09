@@ -3,11 +3,9 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TypedDict, Dict, Any, Union, cast
-
-from dataclasses_json import dataclass_json
 
 from esv_reference_server.msg_box.models import MsgBox
 

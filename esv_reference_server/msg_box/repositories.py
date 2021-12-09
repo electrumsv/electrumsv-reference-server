@@ -21,8 +21,8 @@ from esv_reference_server import errors
 from esv_reference_server.errors import Error
 from esv_reference_server.msg_box import models, view_models, utils
 from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken, MessageMetadata, Message
-from esv_reference_server.msg_box.view_models import APITokenViewModelGet, MessageViewModelGetJSON, \
-    MessageViewModelGetBinary, MsgBoxViewModelAmend
+from esv_reference_server.msg_box.view_models import APITokenViewModelGet, \
+    MessageViewModelGetJSON, MessageViewModelGetBinary, MsgBoxViewModelAmend
 
 if typing.TYPE_CHECKING:
     from esv_reference_server.sqlite_db import SQLiteDatabase
@@ -370,7 +370,7 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, \
                 description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
-                can_read=canread, can_write=canwrite)
+                can_read=bool(canread), can_write=bool(canwrite))
         return None
 
     # Todo - Add an LRU cache for this request
@@ -404,8 +404,8 @@ class MsgBoxSQLiteRepository:
                 id, account_id, msg_box_id, token, description, canread, canwrite, \
                     validfrom, validto = row
                 assert token is not None
-                view: APITokenViewModelGet = APITokenViewModelGet(id=id, token=token, description=description,
-                    can_read=canread, can_write=canwrite)
+                view: APITokenViewModelGet = APITokenViewModelGet(id=id, token=token,
+                        description=description, can_read=bool(canread), can_write=bool(canwrite))
                 result.append(asdict(view))
             return result
         return None
@@ -429,7 +429,8 @@ class MsgBoxSQLiteRepository:
                 return True
         return False
 
-    def write_message(self, message: Message) -> Union[tuple[int, view_models.MessageViewModelGet], Error]:
+    def write_message(self, message: Message) \
+            -> Union[tuple[int, view_models.MessageViewModelGet], Error]:
         """Returns an error code and error reason"""
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()
@@ -556,7 +557,8 @@ class MsgBoxSQLiteRepository:
         return seq
 
     def get_messages(self, api_token_id: int, onlyunread: bool) \
-            -> Optional[tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]], Union[int, str]]]:
+            -> Optional[tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
+                              Union[int, str]]]:
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()
         cur.execute('BEGIN')

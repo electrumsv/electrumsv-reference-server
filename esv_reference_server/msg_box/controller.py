@@ -11,7 +11,7 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Optional, cast, Dict, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import aiohttp
 from aiohttp import web
@@ -22,8 +22,8 @@ from esv_reference_server.errors import Error
 from esv_reference_server.msg_box.models import MsgBox, Message, PushNotification
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.msg_box.view_models import RetentionViewModel, MsgBoxViewModelGet, \
-    MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate, MessageViewModelGet, \
-    MessageViewModelGetJSON, MessageViewModelGetBinary
+    MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate, MessageViewModelGetJSON, \
+    MessageViewModelGetBinary
 from esv_reference_server.types import MsgBoxWSClient, EndpointInfo
 
 if TYPE_CHECKING:
@@ -371,7 +371,8 @@ async def write_message(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'write_message', msg_box_api_token, external_id, msg_box_repository)
+        _auth_for_channel_token(request, 'write_message', msg_box_api_token, external_id,
+            msg_box_repository)
     except web.HTTPException as e:
         raise e
 
@@ -457,7 +458,8 @@ def _get_messages_head(external_id: str, msg_box_api_token: str,
 
 def _get_messages(channelid: str, api_token_id: int, onlyunread: bool, accept_type: str,
         msg_box_repository: MsgBoxSQLiteRepository) \
-            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]], dict[str, str]]:
+            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
+                     dict[str, str]]:
     logger.info(f"Get messages for channel_id: {channelid}.")
     # Todo - use a generator here and sequentially write the messages out to a streamed response
     result = msg_box_repository.get_messages(api_token_id, onlyunread)
@@ -496,7 +498,8 @@ async def get_messages(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'get_messages', msg_box_api_token, external_id, msg_box_repository)
+        _auth_for_channel_token(request, 'get_messages', msg_box_api_token, external_id,
+            msg_box_repository)
     except web.HTTPException as e:
         raise e
 
@@ -541,7 +544,8 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
                                 status=errors.NoBearerToken.status)
 
         try:
-            _auth_for_channel_token(request, 'mark_message_read_or_unread', msg_box_api_token, external_id, msg_box_repository)
+            _auth_for_channel_token(request, 'mark_message_read_or_unread', msg_box_api_token,
+                external_id, msg_box_repository)
         except web.HTTPException as e:
             raise e
 
@@ -586,7 +590,8 @@ async def delete_message(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'delete_message', msg_box_api_token, external_id, msg_box_repository)
+        _auth_for_channel_token(request, 'delete_message', msg_box_api_token, external_id,
+            msg_box_repository)
     except web.HTTPException as e:
         raise e
 
@@ -642,7 +647,8 @@ class MsgBoxWebSocket(web.View):
                             status=errors.NoBearerToken.status)
 
             try:
-                _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token, external_id, msg_box_repository)
+                _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token,
+                    external_id, msg_box_repository)
             except web.HTTPException as e:
                 raise e
 

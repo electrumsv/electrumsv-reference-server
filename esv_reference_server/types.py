@@ -1,4 +1,4 @@
-from typing import NamedTuple, TypedDict, Dict
+from typing import NamedTuple, TypedDict
 
 from aiohttp import web
 
