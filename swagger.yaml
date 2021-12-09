@@ -620,7 +620,7 @@ paths:
           format: hex
     get:
       summary: Get a single raw block header
-      security: []
+      security: []  # no auth required
       tags:
         - HeaderSV APIs
       responses:
@@ -643,8 +643,7 @@ paths:
   /api/v1/headers/by-height:
     get:
       summary: Get a batch of headers by height & count
-      security:
-        - BearerAuth: [ ]
+      security: []  # no auth required
       parameters:
         - name: height
           in: query
@@ -725,9 +724,9 @@ paths:
           description: |
             Subscribe to websocket notifications of the new chain tip.
           content:
-            application/octet-stream:
+            application/json:
               schema:
-                $ref: "#/components/schemas/TipBinary"
+                $ref: "#/components/schemas/Tip"
 
 components:
   securitySchemes:
