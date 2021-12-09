@@ -345,7 +345,7 @@ class TestAiohttpRESTAPI:
         request_body = {
           "description": "some description",
           "can_read": True,
-          "can_write": True
+          "can_write": False
         }
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_create_new_token_for_channel url: {url}")
@@ -364,7 +364,7 @@ class TestAiohttpRESTAPI:
             "token": response_body['token'],
             "description": "some description",
             "can_read": True,
-            "can_write": True
+            "can_write": False
         }
         assert response_body == expected_response_body
 
@@ -380,8 +380,28 @@ class TestAiohttpRESTAPI:
         assert result.status_code == 400, result.reason
         assert result.reason is not None
 
+    def test_write_message_read_only_token_should_fail(self):
+        headers = {}
+        headers["Content-Type"] = "application/json"
+        request_body = {
+            "key": "value"
+        }
+
+        route = self.API_ROUTE_DEFS['write_message']
+        if route.auth_required:
+            _no_auth(route.url, route.http_method)
+            _wrong_auth_type(route.url, route.http_method)
+            _unauthorized(route.url, route.http_method, headers, request_body)
+
+        url = route.url.format(channelid=CHANNEL_ID)
+        self.logger.debug(f"test_write_message_read_only_token_should_fail url: {url}")
+        result: requests.Response = _successful_call(url, route.http_method, headers,
+            request_body, CHANNEL_READ_ONLY_TOKEN)
+
+        assert result.status_code == 401, result.reason
+
     def test_write_message(self):
-        """Uses CHANNEL_READ_ONLY_TOKEN to write messages for the CHANNEL_BEARER_TOKEN to read."""
+        """Uses CHANNEL_BEARER_TOKEN to write messages for the CHANNEL_READ_ONLY_TOKEN to read."""
         headers = {}
         headers["Content-Type"] = "application/json"
         request_body = {
@@ -397,7 +417,7 @@ class TestAiohttpRESTAPI:
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_write_message url: {url}")
         result: requests.Response = _successful_call(url, route.http_method, headers,
-            request_body, CHANNEL_READ_ONLY_TOKEN)
+            request_body, CHANNEL_BEARER_TOKEN)
 
         assert result.status_code == 200, result.reason
 
@@ -417,7 +437,7 @@ class TestAiohttpRESTAPI:
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_get_messages_head url: {url}")
         result: requests.Response = _successful_call(url, 'head', None, None,
-            CHANNEL_BEARER_TOKEN)
+            CHANNEL_READ_ONLY_TOKEN)
         assert result.headers['ETag'] == "1"
         assert result.content == b''
 
@@ -432,7 +452,7 @@ class TestAiohttpRESTAPI:
         url = route.url.format(channelid=CHANNEL_ID) + query_params
         self.logger.debug(f"test_get_messages_head url: {url}")
         result: requests.Response = _successful_call(url, route.http_method, None, None,
-            CHANNEL_BEARER_TOKEN)
+            CHANNEL_READ_ONLY_TOKEN)
         assert result.headers['ETag'] == "1"
         response_body = result.json()
         assert isinstance(response_body, list)
@@ -453,17 +473,37 @@ class TestAiohttpRESTAPI:
         query_params = "?older=true"
         url = route.url.format(channelid=CHANNEL_ID, sequence=sequence) + query_params
         result: requests.Response = _successful_call(url, route.http_method, None, body,
-            CHANNEL_BEARER_TOKEN)
+            CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 200, result.reason
 
         sequence = 2
         url = route.url.format(channelid=CHANNEL_ID, sequence=sequence) + query_params
         result: requests.Response = _successful_call(url, route.http_method, None, body,
-            CHANNEL_BEARER_TOKEN)
+            CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 404, result.reason
         assert result.reason is not None
 
-    def test_delete_message(self):
+    def test_delete_message_read_only_token_should_fail(self):
+        route = self.API_ROUTE_DEFS['delete_message']
+        if route.auth_required:
+            _no_auth(route.url, route.http_method)
+            _wrong_auth_type(route.url, route.http_method)
+            _unauthorized(route.url, route.http_method)
+
+        sequence = 1
+        url = route.url.format(channelid=CHANNEL_ID, sequence=sequence)
+        result: requests.Response = _successful_call(url, route.http_method, None, None,
+            CHANNEL_READ_ONLY_TOKEN)
+        assert result.status_code == 401, result.reason
+
+        sequence = 2
+        url = route.url.format(channelid=CHANNEL_ID, sequence=sequence)
+        result: requests.Response = _successful_call(url, route.http_method, None, None,
+            CHANNEL_READ_ONLY_TOKEN)
+        assert result.status_code == 401, result.reason
+        assert result.reason is not None
+
+    def test_delete_message_should_succeed(self):
         route = self.API_ROUTE_DEFS['delete_message']
         if route.auth_required:
             _no_auth(route.url, route.http_method)
@@ -518,8 +558,8 @@ class TestAiohttpRESTAPI:
                             self.logger.info("CLOSED")
                             break
 
-        async def push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN):
-            for i in range(5):
+        async def push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, expected_msg_count: int):
+            for i in range(expected_msg_count):
                 headers = {}
                 headers["Content-Type"] = "application/json"
                 headers["Authorization"] = f"Bearer {CHANNEL_BEARER_TOKEN}"
@@ -534,7 +574,7 @@ class TestAiohttpRESTAPI:
                         assert resp.status == 200, resp.reason
 
         async def main():
-            EXPECTED_MSG_COUNT = 5
+            EXPECTED_MSG_COUNT = 100
             logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
             logger.debug(f"CHANNEL_BEARER_TOKEN: {CHANNEL_BEARER_TOKEN}")
             logger.debug(f"CHANNEL_READ_ONLY_TOKEN: {CHANNEL_READ_ONLY_TOKEN}")
@@ -543,7 +583,7 @@ class TestAiohttpRESTAPI:
             url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
             asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
             await asyncio.sleep(0.1)
-            asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN))
+            asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
             await completion_event.wait()
 
         asyncio.run(main())

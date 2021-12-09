@@ -49,11 +49,23 @@ def _auth_ok(api_key: str, db: SQLiteDatabase) -> bool:
     return True
 
 
-def _auth_for_channel_token(token: str, external_id: str,
+def _auth_for_channel_token(request: web.Request, handler_name: str, token: str, external_id: str,
         msg_box_repository: MsgBoxSQLiteRepository) -> bool:
     token_object = msg_box_repository.get_api_token(token)
     if not token_object:
-        return False
+        raise web.HTTPUnauthorized()
+
+    if token_object.valid_to and datetime.utcnow() > token_object.valid_to:
+        raise web.HTTPUnauthorized(reason="token expired")
+
+    if (request.method.lower() == 'post'
+            and (handler_name == 'mark_message_read_or_unread' and not token_object.can_read
+                 or handler_name != 'mark_message_read_or_unread' and not token_object.can_write)
+        or (request.method.lower() == 'delete' and not token_object.can_write)
+        or ((request.method.lower() == 'get' or request.method.lower() == 'head')
+            and not token_object.can_read)):
+        raise web.HTTPUnauthorized()
+    logger.debug(f"Request was authenticated as API token: {token}")
     return msg_box_repository.is_authorized_to_msg_box_api_token(external_id, token_object.id)
 
 
@@ -358,8 +370,10 @@ async def write_message(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_for_channel_token(msg_box_api_token, external_id, msg_box_repository):
-        raise web.HTTPUnauthorized
+    try:
+        _auth_for_channel_token(request, 'write_message', msg_box_api_token, external_id, msg_box_repository)
+    except web.HTTPException as e:
+        raise e
 
     MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH', '0'))
 
@@ -481,8 +495,10 @@ async def get_messages(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_for_channel_token(msg_box_api_token, external_id, msg_box_repository):
-        raise web.HTTPUnauthorized
+    try:
+        _auth_for_channel_token(request, 'get_messages', msg_box_api_token, external_id, msg_box_repository)
+    except web.HTTPException as e:
+        raise e
 
     if request.method == 'HEAD':
         try:
@@ -524,8 +540,10 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
             return web.Response(reason=errors.NoBearerToken.reason,
                                 status=errors.NoBearerToken.status)
 
-        if not _auth_for_channel_token(msg_box_api_token, external_id, msg_box_repository):
-            raise web.HTTPUnauthorized
+        try:
+            _auth_for_channel_token(request, 'mark_message_read_or_unread', msg_box_api_token, external_id, msg_box_repository)
+        except web.HTTPException as e:
+            raise e
 
         body = await request.json()
         set_read_to = body['read']
@@ -567,8 +585,10 @@ async def delete_message(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_for_channel_token(msg_box_api_token, external_id, msg_box_repository):
-        raise web.HTTPUnauthorized
+    try:
+        _auth_for_channel_token(request, 'delete_message', msg_box_api_token, external_id, msg_box_repository)
+    except web.HTTPException as e:
+        raise e
 
     logger.info(f"Deleting message sequence: {sequence} in msg_box: {external_id}.")
     msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
@@ -621,8 +641,10 @@ class MsgBoxWebSocket(web.View):
                 raise Error(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-            if not _auth_for_channel_token(msg_box_api_token, external_id, msg_box_repository):
-                raise Error(reason="unauthorized", status=web.HTTPUnauthorized.status_code)
+            try:
+                _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token, external_id, msg_box_repository)
+            except web.HTTPException as e:
+                raise e
 
             msg_box_external_id = self.request.match_info.get('channelid')
             msg_box = msg_box_repository.get_msg_box(account_id, external_id)
