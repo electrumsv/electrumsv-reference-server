@@ -187,7 +187,7 @@ class SQLiteDatabaseBase:
     def is_closed(self) -> bool:
         return self._connection_pool.qsize() == 0
 
-    def execute(self, sql: str, params: Optional[tuple]=None) -> List[Any]:
+    def execute(self, sql: str, params: Optional[Tuple[Any, ...]]=None) -> List[Any]:
         """Thread-safe"""
         connection = self.acquire_connection()
         cur = connection.cursor()
@@ -197,7 +197,7 @@ class SQLiteDatabaseBase:
                 cur = cur.execute(sql)
             else:
                 cur = cur.execute(sql, params)
-            result = cur.fetchall()
+            result: List[Any] = cur.fetchall()
             cur.execute("COMMIT")
             return result
         except Exception:
@@ -207,7 +207,7 @@ class SQLiteDatabaseBase:
         finally:
             self.release_connection(connection)
 
-    def execute2(self, sql: str, params: Optional[tuple]=None) -> sqlite3.Cursor:
+    def execute2(self, sql: str, params: Optional[Tuple[Any, ...]]=None) -> sqlite3.Cursor:
         """Thread-safe
         This returns the cursor to allow the caller to get rowcount or whatever.
         """
@@ -228,10 +228,10 @@ class SQLiteDatabaseBase:
         finally:
             self.release_connection(connection)
 
-    def create_tables(self):
+    def create_tables(self) -> None:
         raise NotImplementedError()
 
-    def drop_tables(self):
+    def drop_tables(self) -> None:
         result = self.get_tables()
         queries = []
         for row in result:
@@ -242,12 +242,12 @@ class SQLiteDatabaseBase:
             self.logger.debug(f"Running sql: {query}")
             self.execute(query)
 
-    def get_tables(self):
+    def get_tables(self) -> list[str]:
         sql = """SELECT name FROM sqlite_master WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
         return self.execute(sql)
 
 
-    def reset_tables(self):
+    def reset_tables(self) -> None:
         self.drop_tables()
         self.create_tables()
 
@@ -264,7 +264,7 @@ class SQLiteDatabase(SQLiteDatabaseBase):
         self.logger = logging.getLogger("sqlite-database")
         super().__init__(storage_path)
 
-    def create_tables(self):
+    def create_tables(self) -> None:
         self.create_account_table()
         self.create_account_payment_channel_table()
 

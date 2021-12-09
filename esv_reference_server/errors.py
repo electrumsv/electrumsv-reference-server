@@ -2,8 +2,11 @@
 Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
+from typing import Dict
 
 from aiohttp.web_exceptions import HTTPForbidden, HTTPBadRequest, HTTPConflict
+
+from esv_reference_server.types import WebsocketError
 
 
 class Error(Exception):
@@ -12,17 +15,17 @@ class Error(Exception):
         self.reason = reason
         self.status = status
 
-    def to_websocket_dict(self):
+    def to_websocket_dict(self) -> Dict[str, WebsocketError]:
         return {"error": {"reason": self.reason,
                           "status_code": self.status}}
 
     @classmethod
-    def from_websocket_dict(cls, message: dict):
+    def from_websocket_dict(cls, message: Dict[str, WebsocketError]) -> 'Error':
         reason = message["error"]["reason"]
         status = message["error"]["status_code"]
         return cls(reason, status)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Error(reason={self.reason}, status={self.status})"
 
 

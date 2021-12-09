@@ -33,7 +33,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
+from typing import cast
 
 from bitcoinx import InterpreterLimits, MinerPolicy, Tx, TxInputContext, TxOutput
 
@@ -48,7 +48,7 @@ def verify_utxo_spend(transaction: Tx, input_index: int, utxo: TxOutput) -> bool
     verification_limits = InterpreterLimits(miner_policy, is_genesis_enabled,
         is_transaction_in_block)
     context = TxInputContext(transaction, input_index, utxo, is_utxo_after_genesis)
-    return context.verify_input(verification_limits)
+    return cast(bool, context.verify_input(verification_limits))
 
 
 async def verify_utxo_spend_async(transaction: Tx, input_index: int, utxo: TxOutput) -> bool:

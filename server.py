@@ -70,7 +70,7 @@ class AiohttpServer:
         await self.runner.setup()
         site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
         await site.start()
-        self.app_state.start_threads()
+        self.app_state.start_tasks()
         while self.app.is_alive:
             await asyncio.sleep(0.5)
 
@@ -86,8 +86,10 @@ def load_dotenv(dotenv_path):
             if line.startswith("#") or line.strip() == '':
                 continue
 
-            key = line.strip().split("=")[0]
-            val = line.strip().split("=")[1]
+            # Split line on "=" symbol but need to take care of base64 encoded string values.
+            split_line = line.strip().split("=")
+            key = split_line[0]
+            val = split_line[1] + "".join(["=" + part for part in split_line[2:]])
             os.environ[key] = val
 
 

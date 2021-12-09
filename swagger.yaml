@@ -594,11 +594,9 @@ paths:
         description: The url safe, base64 encoded external channel id
         schema:
           type: string
-          format: url_safe_base64
     get:
       summary: Subscribe to websocket notifications for new messages
-      security:
-        - BearerAuth: [ ]
+      security: [ ]
       tags:
         - Peer Channels - Websocket API
       responses:

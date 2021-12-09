@@ -3,6 +3,7 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 import logging
+from dataclasses import asdict
 
 try:
     # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
@@ -12,15 +13,16 @@ except ModuleNotFoundError:
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
 
+from typing import Optional, Union, List, Dict, Any
 import typing
-from typing import Optional, Union
 from datetime import datetime
 
 from esv_reference_server import errors
 from esv_reference_server.errors import Error
 from esv_reference_server.msg_box import models, view_models, utils
-from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken, MessageMetadata
-from esv_reference_server.msg_box.view_models import APITokenViewModelGet
+from esv_reference_server.msg_box.models import MsgBox, MsgBoxAPIToken, MessageMetadata, Message
+from esv_reference_server.msg_box.view_models import APITokenViewModelGet, \
+    MessageViewModelGetJSON, MessageViewModelGetBinary, MsgBoxViewModelAmend
 
 if typing.TYPE_CHECKING:
     from esv_reference_server.sqlite_db import SQLiteDatabase
@@ -36,11 +38,12 @@ class MsgBoxSQLiteRepository:
         self.db = sqlite
         self.create_tables()
 
-    def create_tables(self):
+    def create_tables(self) -> None:
         self.create_message_box_table()
         self.create_messages_table()
         self.create_message_box_api_tokens_table()
         self.create_message_status_table()
+        return None
 
     def create_message_box_table(self) -> None:
         """Modelled very closely on Peer Channels reference implementation:
@@ -101,7 +104,7 @@ class MsgBoxSQLiteRepository:
             )""")
         self.db.execute2(sql)
 
-    def create_message_box_api_tokens_table(self):
+    def create_message_box_api_tokens_table(self) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
         sql = ("""CREATE TABLE IF NOT EXISTS msg_box_api_token (
@@ -122,8 +125,9 @@ class MsgBoxSQLiteRepository:
             )
             """)
         self.db.execute2(sql)
+        return None
 
-    def update_msg_box(self, msg_box_view_amend: view_models.MsgBoxViewModelAmend,
+    def update_msg_box(self, msg_box_view_amend: MsgBoxViewModelAmend,
             external_id: str) -> Optional[view_models.MsgBoxViewModelAmend]:
         sql = f"""
             UPDATE msg_box
@@ -188,8 +192,8 @@ class MsgBoxSQLiteRepository:
                 msg_box_id=msg_box_id,
                 token=token,
                 description=description,
-                can_read=canread,
-                can_write=canwrite,
+                can_read=bool(canread),
+                can_write=bool(canwrite),
                 valid_from=validfrom,
                 valid_to=validto
             )
@@ -354,7 +358,7 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, \
                 description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
-                can_read=canread, can_write=canwrite)
+                can_read=bool(canread), can_write=bool(canwrite))
         return None
 
     def get_api_token_by_id(self, token_id: int) -> Optional[APITokenViewModelGet]:
@@ -366,7 +370,7 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, \
                 description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
-                can_read=canread, can_write=canwrite)
+                can_read=bool(canread), can_write=bool(canwrite))
         return None
 
     # Todo - Add an LRU cache for this request
@@ -379,11 +383,11 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, description, \
                 canread, canwrite, validfrom, validto = rows[0]
             return MsgBoxAPIToken(id, account_id, msg_box_id,
-                token, description, canread, canwrite, validfrom, validto)
+                token, description, bool(canread), bool(canwrite), validfrom, validto)
         return None
 
     def get_api_tokens(self, external_id: str, token: Optional[str]=None) \
-            -> Optional[list[APITokenViewModelGet]]:
+            -> Optional[List[Dict[str, Any]]]:
         sql = """
         SELECT msg_box_api_token.*
         FROM msg_box_api_token
@@ -400,19 +404,18 @@ class MsgBoxSQLiteRepository:
                 id, account_id, msg_box_id, token, description, canread, canwrite, \
                     validfrom, validto = row
                 assert token is not None
-                view = APITokenViewModelGet(id=id, token=token, description=description,
-                    can_read=canread, can_write=canwrite)
-                result.append(view.to_dict())
+                view: APITokenViewModelGet = APITokenViewModelGet(id=id, token=token,
+                        description=description, can_read=bool(canread), can_write=bool(canwrite))
+                result.append(asdict(view))
             return result
         return None
 
-    def delete_api_token(self, token_id):
+    def delete_api_token(self, token_id: int) -> None:
         sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
         params = (datetime.utcnow(), token_id)
-        result = self.db.execute(sql, params)
-        return result
+        self.db.execute(sql, params)
 
-    def is_authorized_to_msg_box_api_token(self, externalid: str, token_id: int):
+    def is_authorized_to_msg_box_api_token(self, externalid: str, token_id: int) -> bool:
         sql = """
             SELECT COUNT('x') FROM msg_box_api_token
             INNER JOIN msg_box ON msg_box_api_token.msg_box_id = msg_box.id
@@ -422,11 +425,12 @@ class MsgBoxSQLiteRepository:
         rows = self.db.execute(sql, params)
         if len(rows) != 0:
             result = rows[0][0]
-            if result == 0:
-                return False
-            return True
+            if result != 0:
+                return True
+        return False
 
-    def write_message(self, message) -> Union[tuple[int, view_models.MessageViewModelGet], Error]:
+    def write_message(self, message: Message) \
+            -> Union[tuple[int, view_models.MessageViewModelGet], Error]:
         """Returns an error code and error reason"""
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()
@@ -509,7 +513,7 @@ class MsgBoxSQLiteRepository:
         finally:
             self.db.release_connection(connection)
 
-    def get_unread_messages_count(self, cursor: sqlite3.Cursor, msg_box_api_token_id) -> int:
+    def get_unread_messages_count(self, cursor: sqlite3.Cursor, msg_box_api_token_id: int) -> int:
         sql = """
             SELECT Count(*)
             FROM message_status
@@ -519,12 +523,12 @@ class MsgBoxSQLiteRepository:
         """
         params = (msg_box_api_token_id, )
         rows = cursor.execute(sql, params).fetchall()
-        count = None
+        count = 0
         if len(rows) != 0:
             count = rows[0][0]
-        return count if count else 0
+        return count
 
-    def get_max_sequence(self, api_key: str, external_id: str):
+    def get_max_sequence(self, api_key: str, external_id: str) -> int:
         sql = """
             SELECT MAX(message.seq) AS max_sequence
             FROM message
@@ -547,13 +551,14 @@ class MsgBoxSQLiteRepository:
         """
         params = (external_id, api_key, datetime.utcnow())
         rows = self.db.execute(sql, params)
-        seq = None
+        seq = 0
         if len(rows) != 0:
             seq = rows[0][0]
-        return seq if seq else 0
+        return seq
 
     def get_messages(self, api_token_id: int, onlyunread: bool) \
-            -> Optional[tuple[list[view_models.MessageViewModelGet], int]]:
+            -> Optional[tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
+                              Union[int, str]]]:
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()
         cur.execute('BEGIN')
@@ -644,8 +649,8 @@ class MsgBoxSQLiteRepository:
         params = (token_id, sequence)
         rows = self.db.execute(sql, params)
         if len(rows) != 0:
-            sequence_count = rows[0][0]
-            return sequence_count == 1
+            sequence_count: int = rows[0][0]
+            return bool(sequence_count == 1)
         return False
 
     def mark_messages(self, external_id: str, token_id: int, sequence: int, mark_older: bool,
@@ -688,7 +693,7 @@ class MsgBoxSQLiteRepository:
             )
         return None
 
-    def delete_message(self, message_id: int):
+    def delete_message(self, message_id: int) -> int:
         sql = "UPDATE message_status SET isdeleted = true " \
               "WHERE message_id = @message_id RETURNING id;"
         params = (message_id,)

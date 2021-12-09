@@ -16,7 +16,7 @@ import os
 import logging
 import queue
 import threading
-from typing import AsyncIterator, Dict, Tuple, Optional
+from typing import AsyncIterator, Dict, Tuple, Optional, Any
 
 from aiohttp.web_app import Application
 
@@ -47,7 +47,7 @@ requests_logger.setLevel(logging.WARNING)
 
 class AiohttpApplication(web.Application):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.is_alive: bool = False
         self.routes: list[Route] = []
@@ -69,7 +69,7 @@ class ApplicationState(object):
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: queue.Queue = queue.Queue()  # json only
+        self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
@@ -77,8 +77,8 @@ class ApplicationState(object):
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
 
-    def start_threads(self):
-        threading.Thread(target=self.message_box_notifications_thread, daemon=True).start()
+    def start_tasks(self) -> None:
+        asyncio.create_task(self.message_box_notifications_task())
         if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
             threading.Thread(target=self.header_notifications_thread, daemon=True).start()
 
@@ -87,7 +87,7 @@ class ApplicationState(object):
         with self.headers_ws_clients_lock:
             return self.headers_ws_clients
 
-    def add_ws_client(self, ws_client: HeadersWSClient):
+    def add_ws_client(self, ws_client: HeadersWSClient) -> None:
         with self.headers_ws_clients_lock:
             self.headers_ws_clients[ws_client.ws_id] = ws_client
 
@@ -159,7 +159,7 @@ class ApplicationState(object):
         with self.msg_box_ws_clients_lock:
             return self.msg_box_ws_clients
 
-    def add_msg_box_ws_client(self, ws_client: MsgBoxWSClient):
+    def add_msg_box_ws_client(self, ws_client: MsgBoxWSClient) -> None:
         with self.msg_box_ws_clients_lock:
             self.msg_box_ws_clients[ws_client.ws_id] = ws_client
 
@@ -167,7 +167,7 @@ class ApplicationState(object):
         with self.msg_box_ws_clients_lock:
             del self.msg_box_ws_clients[ws_client.ws_id]
 
-    def message_box_notifications_thread(self) -> None:
+    async def message_box_notifications_task(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
             notification: PushNotification
@@ -175,7 +175,8 @@ class ApplicationState(object):
             ws_client: MsgBoxWSClient
             while self.app.is_alive:
                 try:
-                    msg_box_api_token_id, notification = self.msg_box_new_msg_queue.get()
+                    msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
+                    self.logger.debug(f"Got peer channel notification... {notification}")
                 except Exception as e:
                     logger.exception(e)
                     continue
@@ -189,13 +190,14 @@ class ApplicationState(object):
                 #  lookup the relevant clients - iterating over all clients is poor form...
                 for ws_id, ws_client in self.get_msg_box_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    if ws_client.msg_box_internal_id == notification.msg_box.id:
-                        msg = json.dumps(notification.notification_new_message_text)
-
-                    asyncio.run_coroutine_threadsafe(
-                        ws_client.websocket.send_json(notification.to_dict()), self.loop)
+                    if ws_client.msg_box_internal_id == notification['channel_id'].id:
+                        try:
+                            msg = json.dumps(notification['notification'])
+                            await ws_client.websocket.send_str(data=msg)
+                        except Exception as e:
+                            print("guioahoga")
         except Exception:
-            self.logger.exception("unexpected exception in header_notifications_thread")
+            self.logger.exception("unexpected exception in message_box_notifications_task")
         finally:
             self.logger.info("Closing push notifications thread")
 
@@ -217,7 +219,7 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
 
 
 # Custom media handlers
-async def application_json(request: web.Request) -> Tuple[Dict, bool]:
+async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
     try:
         return await request.json(), False
     except ValueError as e:
