@@ -192,8 +192,8 @@ class MsgBoxSQLiteRepository:
                 msg_box_id=msg_box_id,
                 token=token,
                 description=description,
-                can_read=canread,
-                can_write=canwrite,
+                can_read=bool(canread),
+                can_write=bool(canwrite),
                 valid_from=validfrom,
                 valid_to=validto
             )
@@ -358,7 +358,7 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, \
                 description, canread, canwrite, validfrom, validto = rows[0]
             return APITokenViewModelGet(id=id, token=token, description=description,
-                can_read=canread, can_write=canwrite)
+                can_read=bool(canread), can_write=bool(canwrite))
         return None
 
     def get_api_token_by_id(self, token_id: int) -> Optional[APITokenViewModelGet]:
@@ -383,7 +383,7 @@ class MsgBoxSQLiteRepository:
             id, account_id, msg_box_id, token, description, \
                 canread, canwrite, validfrom, validto = rows[0]
             return MsgBoxAPIToken(id, account_id, msg_box_id,
-                token, description, canread, canwrite, validfrom, validto)
+                token, description, bool(canread), bool(canwrite), validfrom, validto)
         return None
 
     def get_api_tokens(self, external_id: str, token: Optional[str]=None) \

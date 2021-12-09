@@ -418,7 +418,7 @@ async def write_message(request: web.Request) -> web.Response:
         notification=notification_new_message_text,
         received=message.received_ts
     )
-    app_state.msg_box_new_msg_queue.put((msg_box_api_token_object.id, notification))
+    app_state.msg_box_new_msg_queue.put_nowait((msg_box_api_token_object.id, notification))
 
     return web.json_response(msg_box_get_view.to_dict())
 
@@ -651,8 +651,10 @@ class MsgBoxWebSocket(web.View):
 
     async def _handle_new_connection(self, client: MsgBoxWSClient) -> None:
         # self.msg_box_ws_clients = self.request.app['msg_box_ws_clients']
+        self.logger.debug(f"OHGOAHGOAJOGOAGJOLA 1")
 
         async for msg in client.websocket:
+            self.logger.debug(f"OHGOAHGOAJOGOAGJOLA 2")
             # Ignore all messages from client
             if msg.type == aiohttp.WSMsgType.text:
                 self.logger.debug('%s new message box websocket client sent (message ignored): %s',

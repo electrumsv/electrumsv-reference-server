@@ -70,7 +70,7 @@ class AiohttpServer:
         await self.runner.setup()
         site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
         await site.start()
-        self.app_state.start_threads()
+        self.app_state.start_tasks()
         while self.app.is_alive:
             await asyncio.sleep(0.5)
 

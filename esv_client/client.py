@@ -17,9 +17,9 @@ from aiohttp.web_exceptions import HTTPClientError
 from esv_reference_server.errors import Error
 
 SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 47124
-WS_URL_HEADERS = "http://localhost:47124/api/v1/chain/tips/websocket"
-WS_URL_TEMPLATE_MSG_BOX = "http://localhost:47124/api/v1/channel/{channelid}/notify"
+SERVER_PORT = 52462
+WS_URL_HEADERS = f"http://localhost:{SERVER_PORT}/api/v1/chain/tips/websocket"
+WS_URL_TEMPLATE_MSG_BOX = "http://localhost:52462/api/v1/channel/{channelid}/notify"
 
 
 class MockApplicationState:
@@ -54,11 +54,11 @@ class ElectrumSVClient:
                 print(f'Connected to {url}')
 
                 async for msg in ws:
-                    print('New message from msg box: ', msg.data)
                     msg: aiohttp.WSMessage
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         content = json.loads(msg.data)
-                        if content.get('error'):
+                        print('New message from msg box: ', content)
+                        if isinstance(content, dict) and content.get('error'):
                             error: Error = Error.from_websocket_dict(content)
                             print(f"Websocket error: {error}")
                             if error.status == web.HTTPUnauthorized.status_code:
@@ -74,8 +74,8 @@ class ElectrumSVClient:
 async def main() -> None:
     app_state = MockApplicationState()
     client = ElectrumSVClient(app_state)
-    msg_box_external_id = "2y2A4zN1eLL7LHmNr8oFUbe4BD4IMr2jtBIT9EWTSb9xoTeZHY2n578dM83_C6m2GH52FJFgRavJBiNW73Lrvg=="
-    msg_box_api_token = "_GaA5PlJ8WTF8OqhI6D6HAmlwYe8UbJgtRYZ2HxgdlAQ2H4KXNdcxtcztJ3C_wquz3bu1lAyjbWzjmkZMLGZfQ=="
+    msg_box_external_id = "Da7_p8OTF7LVPng2ZPjS9w1UOytL9_iRrAb0abAzpITG9QBGhgkGOjVcL7osUf4xQPrMV9FWin_SHrC5KJnkgQ=="
+    msg_box_api_token = "N1FLVGfduRMKZl3X8h_eAqAyKr_RkJFoXqkHahUahP1wEH2A3Zi9xLJV5VxitYomYENo86CQXiCACjNzMJ-CsA=="
     url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=msg_box_external_id)
     while True:
         try:

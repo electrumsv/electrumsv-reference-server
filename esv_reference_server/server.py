@@ -69,7 +69,7 @@ class ApplicationState(object):
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: queue.Queue[tuple[int, PushNotification]] = queue.Queue()  # json only
+        self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
@@ -77,8 +77,8 @@ class ApplicationState(object):
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
 
-    def start_threads(self) -> None:
-        threading.Thread(target=self.message_box_notifications_thread, daemon=True).start()
+    def start_tasks(self) -> None:
+        asyncio.create_task(self.message_box_notifications_task())
         if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
             threading.Thread(target=self.header_notifications_thread, daemon=True).start()
 
@@ -167,7 +167,7 @@ class ApplicationState(object):
         with self.msg_box_ws_clients_lock:
             del self.msg_box_ws_clients[ws_client.ws_id]
 
-    def message_box_notifications_thread(self) -> None:
+    async def message_box_notifications_task(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
             notification: PushNotification
@@ -175,7 +175,8 @@ class ApplicationState(object):
             ws_client: MsgBoxWSClient
             while self.app.is_alive:
                 try:
-                    msg_box_api_token_id, notification = self.msg_box_new_msg_queue.get()
+                    msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
+                    self.logger.debug(f"Got peer channel notification... {notification}")
                 except Exception as e:
                     logger.exception(e)
                     continue
@@ -190,12 +191,13 @@ class ApplicationState(object):
                 for ws_id, ws_client in self.get_msg_box_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
                     if ws_client.msg_box_internal_id == notification['channel_id'].id:
-                        msg = json.dumps(notification['notification'])
-
-                    asyncio.run_coroutine_threadsafe(
-                        ws_client.websocket.send_json(notification), self.loop)
+                        try:
+                            msg = json.dumps(notification['notification'])
+                            await ws_client.websocket.send_str(data=msg)
+                        except Exception as e:
+                            print("guioahoga")
         except Exception:
-            self.logger.exception("unexpected exception in header_notifications_thread")
+            self.logger.exception("unexpected exception in message_box_notifications_task")
         finally:
             self.logger.info("Closing push notifications thread")
 
