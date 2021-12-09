@@ -5,6 +5,7 @@ import aiohttp
 import bitcoinx
 import typing
 from aiohttp import web
+from aiohttp.web_ws import WebSocketResponse
 
 from esv_reference_server.types import HeadersWSClient
 
@@ -18,7 +19,7 @@ async def get_header(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
 
-    accept_type = request.headers.get('Accept')
+    accept_type = request.headers.get('Accept', 'application/json')
     blockhash = request.match_info.get('hash')
     if not blockhash:
         return web.HTTPBadRequest(reason="'hash' path parameter not supplied")
@@ -51,7 +52,7 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
     client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
 
-    accept_type = request.headers.get('Accept')
+    accept_type = request.headers.get('Accept', 'application/json')
     params = request.rel_url.query
     height = params.get('height', '0')
     count = params.get('count', '1')
@@ -109,7 +110,7 @@ class HeadersWebSocket(web.View):
 
     logger = logging.getLogger("headers-websocket")
 
-    async def get(self):
+    async def get(self) -> WebSocketResponse:
         """The communication for this is one-way - for header notifications only.
         Client messages will be ignored"""
         ws = web.WebSocketResponse()
@@ -127,7 +128,7 @@ class HeadersWebSocket(web.View):
             self.logger.debug("removing headers websocket id: %s", ws_id)
             del self.request.app['headers_ws_clients'][ws_id]
 
-    async def _send_chain_tip(self, client: HeadersWSClient):
+    async def _send_chain_tip(self, client: HeadersWSClient) -> None:
         """Called once on initial connection"""
         client_session: aiohttp.ClientSession = self.request.app['client_session']
         app_state = self.request.app['app_state']
@@ -157,7 +158,7 @@ class HeadersWebSocket(web.View):
             self.logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
             pass
 
-    async def _handle_new_connection(self, client: HeadersWSClient):
+    async def _handle_new_connection(self, client: HeadersWSClient) -> None:
         self.ws_clients = self.request.app['headers_ws_clients']
         await self._send_chain_tip(client)
 
@@ -175,3 +176,4 @@ class HeadersWebSocket(web.View):
                 # without a traceback. see aiohttp.ws_client.py:receive for details.
                 self.logger.error('ws connection closed with exception %s',
                     client.websocket.exception())
+            return None

@@ -16,7 +16,7 @@ import os
 import logging
 import queue
 import threading
-from typing import AsyncIterator, Dict, Tuple, Optional
+from typing import AsyncIterator, Dict, Tuple, Optional, Any
 
 from aiohttp.web_app import Application
 
@@ -47,7 +47,7 @@ requests_logger.setLevel(logging.WARNING)
 
 class AiohttpApplication(web.Application):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.is_alive: bool = False
         self.routes: list[Route] = []
@@ -69,7 +69,7 @@ class ApplicationState(object):
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: queue.Queue = queue.Queue()  # json only
+        self.msg_box_new_msg_queue: queue.Queue[tuple[int, PushNotification]] = queue.Queue()  # json only
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
@@ -77,7 +77,7 @@ class ApplicationState(object):
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
 
-    def start_threads(self):
+    def start_threads(self) -> None:
         threading.Thread(target=self.message_box_notifications_thread, daemon=True).start()
         if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
             threading.Thread(target=self.header_notifications_thread, daemon=True).start()
@@ -87,7 +87,7 @@ class ApplicationState(object):
         with self.headers_ws_clients_lock:
             return self.headers_ws_clients
 
-    def add_ws_client(self, ws_client: HeadersWSClient):
+    def add_ws_client(self, ws_client: HeadersWSClient) -> None:
         with self.headers_ws_clients_lock:
             self.headers_ws_clients[ws_client.ws_id] = ws_client
 
@@ -159,7 +159,7 @@ class ApplicationState(object):
         with self.msg_box_ws_clients_lock:
             return self.msg_box_ws_clients
 
-    def add_msg_box_ws_client(self, ws_client: MsgBoxWSClient):
+    def add_msg_box_ws_client(self, ws_client: MsgBoxWSClient) -> None:
         with self.msg_box_ws_clients_lock:
             self.msg_box_ws_clients[ws_client.ws_id] = ws_client
 
@@ -189,11 +189,11 @@ class ApplicationState(object):
                 #  lookup the relevant clients - iterating over all clients is poor form...
                 for ws_id, ws_client in self.get_msg_box_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    if ws_client.msg_box_internal_id == notification.msg_box.id:
-                        msg = json.dumps(notification.notification_new_message_text)
+                    if ws_client.msg_box_internal_id == notification['channel_id'].id:
+                        msg = json.dumps(notification['notification'])
 
                     asyncio.run_coroutine_threadsafe(
-                        ws_client.websocket.send_json(notification.to_dict()), self.loop)
+                        ws_client.websocket.send_json(notification), self.loop)
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
         finally:
@@ -217,7 +217,7 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
 
 
 # Custom media handlers
-async def application_json(request: web.Request) -> Tuple[Dict, bool]:
+async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
     try:
         return await request.json(), False
     except ValueError as e:

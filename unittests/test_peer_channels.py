@@ -9,11 +9,15 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+import aiohttp
+import pytest
 import requests
 from aiohttp import web
 from aiohttp.web_app import Application
 from bitcoinx import PrivateKey, PublicKey
 
+from esv_client.client import WS_URL_TEMPLATE_MSG_BOX
+from esv_reference_server.errors import Error
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from server import logger, AiohttpServer, get_app
 
@@ -28,7 +32,7 @@ REF_TYPE_OUTPUT = 0
 REF_TYPE_INPUT = 1
 STREAM_TERMINATION_BYTE = b"\x00"
 
-TEST_MASTER_BEARER_TOKEN = ""
+TEST_MASTER_BEARER_TOKEN = "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 CHANNEL_ID = None
@@ -164,6 +168,7 @@ class TestAiohttpRESTAPI:
         self.logger.debug(f"test_create_new_channel url: {route.url}")
         result: requests.Response = self._successful_call(route.url, route.http_method, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
+
         assert result.status_code == 200, result.reason
 
         response_body = result.json()
@@ -479,6 +484,7 @@ class TestAiohttpRESTAPI:
         assert result.status_code == 404, result.reason
         assert result.reason is not None
 
+    # @pytest.mark.asyncio
     # def test_channels_websocket(self):
     #     EXPECTED_MSG_COUNT = 5
     #     self.logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
@@ -538,7 +544,8 @@ class TestAiohttpRESTAPI:
     #
     #         await completion_event.wait()
     #
-    #     asyncio.run(main())
+    #     loop = asyncio.get_event_loop()
+    #     loop.run_until_complete(main())
 
     def test_revoke_selected_token(self):
         route = self.API_ROUTE_DEFS['revoke_selected_token']

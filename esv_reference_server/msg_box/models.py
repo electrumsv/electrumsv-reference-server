@@ -4,7 +4,7 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, TypedDict
 
 
 @dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
@@ -78,14 +78,7 @@ class MessageMetadata(NamedTuple):
     received_ts: datetime
 
 
-class PushNotification(NamedTuple):
-    msg_box: MsgBox
-    notification_new_message_text: str
-    received_ts: datetime
-
-    def to_dict(self):
-        return {
-            "channel_id": self.msg_box.id,
-            "notification": self.notification_new_message_text,
-            "received": self.received_ts.isoformat()
-        }
+class PushNotification(TypedDict):
+    channel_id: MsgBox
+    notification: str
+    received: datetime

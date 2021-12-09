@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict, Dict
 
 from aiohttp import web
 
@@ -18,6 +18,11 @@ class MsgBoxWSClient(NamedTuple):
 class Route(NamedTuple):
     aiohttp_route_def: web.RouteDef
     auth_required: bool
+
+
+class WebsocketError(TypedDict):
+    reason: str
+    status_code: int
 
 
 class EndpointInfo(NamedTuple):

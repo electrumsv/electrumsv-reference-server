@@ -37,7 +37,7 @@
 
 import math
 import struct
-from typing import Tuple, Optional
+from typing import Tuple, Optional, cast
 
 from bitcoinx import Bitcoin, classify_output_script, double_sha256, InterpreterError, Ops, \
     P2MultiSig_Output, pack_byte, PrivateKey, PublicKey, Script, SigHash, Signature, \
@@ -241,7 +241,7 @@ async def process_funding_transaction_async(transaction_bytes: bytes,
     if not is_spend_valid:
         raise BrokenChannelError("Funding transaction spend invalid")
 
-    return expected_output_script.to_script_bytes()
+    return cast(bytes, expected_output_script.to_script_bytes())
 
 
 def _insert_refund_signature(input_script: Script, signature_bytes: bytes) -> Script:
@@ -384,7 +384,7 @@ async def process_contract_close_async(client_refund_signature_bytes: bytes, ref
     # If we added any other inputs, we should sign them here.
     pass
 
-    return contract_transaction.to_bytes()
+    return cast(bytes, contract_transaction.to_bytes())
 
 
 def _sign_contract_transaction_input(contract_transaction: Tx, funding_output_script_bytes: bytes,
@@ -396,7 +396,8 @@ def _sign_contract_transaction_input(contract_transaction: Tx, funding_output_sc
     signature_hash = contract_transaction.signature_hash(0, funding_value,
         funding_output_script_bytes, sig_hash)
     signature_bytes = private_key.sign(signature_hash, None)
-    return signature_bytes + pack_byte(sig_hash)
+    sig: bytes = signature_bytes + pack_byte(sig_hash)
+    return sig
 
 
 # NOTE: Our initial choice to calculate the transaction fee is forcing rounded up 0.5 sats/byte.
