@@ -4,19 +4,17 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 
 import json
-import time
 from pathlib import Path
 
 import aiohttp
 import bitcoinx
-import requests
 from aiohttp import web
 import asyncio
 import os
 import logging
 import queue
 import threading
-from typing import AsyncIterator, Dict, Tuple, Optional, Any
+from typing import AsyncIterator, Dict, Tuple, Optional, Any, List
 
 from aiohttp.web_app import Application
 
@@ -50,8 +48,8 @@ class AiohttpApplication(web.Application):
     def __init__(self) -> None:
         super().__init__()
         self.is_alive: bool = False
-        self.routes: list[Route] = []
-        self.API_ROUTE_DEFS: dict[str, EndpointInfo] = {}
+        self.routes: List[Route] = []
+        self.API_ROUTE_DEFS: Dict[str, EndpointInfo] = {}
 
 
 class ApplicationState(object):
@@ -69,18 +67,19 @@ class ApplicationState(object):
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
+        self.msg_box_new_msg_queue: asyncio.Queue[Tuple[int, PushNotification]] = asyncio.Queue()
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
         self.msg_box_repository = MsgBoxSQLiteRepository(self.sqlite_db)
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
+        self.aiohttp_session: Optional[aiohttp.ClientSession] = None
 
     def start_tasks(self) -> None:
         asyncio.create_task(self.message_box_notifications_task())
         if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
-            threading.Thread(target=self.header_notifications_thread, daemon=True).start()
+            asyncio.create_task(self.header_notifications_task())
 
     # Headers Websocket Client Get/Add/Remove & Notify thread
     def get_ws_clients(self) -> Dict[str, HeadersWSClient]:
@@ -95,20 +94,34 @@ class ApplicationState(object):
         with self.headers_ws_clients_lock:
             del self.headers_ws_clients[ws_client.ws_id]
 
-    def header_notifications_thread(self) -> None:
+    async def _get_aiohttp_session(self) -> aiohttp.ClientSession:
+        if not self.aiohttp_session:
+            self.aiohttp_session = aiohttp.ClientSession()
+        return self.aiohttp_session
+
+    async def close_aiohttp_session(self) -> None:
+        if self.aiohttp_session:
+            await self.aiohttp_session.close()
+
+    async def header_notifications_task(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
+            session = await self._get_aiohttp_session()
             current_best_hash = ""
 
             while self.app.is_alive:
                 try:
                     url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
-                    result = requests.get(url_to_fetch, request_headers)
-                    result.raise_for_status()
+                    request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
+                                    "id": 1}
+                    async with session.post(url_to_fetch, headers=request_headers,
+                            json=request_body) as resp:
+                        assert resp.status == 200, resp.reason
+                        result = await resp.json()
 
                     longest_chain_tip = None
-                    for tip in result.json():
+                    for tip in result:
                         if tip['state'] == "LONGEST_CHAIN":
                             longest_chain_tip = tip
 
@@ -120,9 +133,9 @@ class ApplicationState(object):
                         current_best_hash = longest_chain_tip['header']['hash']
                         current_best_height = longest_chain_tip['height']
                     else:
-                        time.sleep(2)
+                        await asyncio.sleep(1)
                         continue
-                except requests.exceptions.ConnectionError as e:
+                except aiohttp.ClientConnectorError as e:
                     logger.error(f"HeaderSV service is unavailable on {self.header_sv_url}")
                     # Any new websocket connections will be notified when HeaderSV is back online
                     current_best_hash = ""
@@ -138,17 +151,17 @@ class ApplicationState(object):
                 for ws_id, ws_client in self.get_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
                     url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
-
-                    # Todo: this should actually be 'Accept' but HeaderSV uses 'Content-Type'
-                    request_headers = {'Content-Type': 'application/octet-stream'}
-                    result = requests.get(url_to_fetch, headers=request_headers)
-                    result.raise_for_status()
-
-                    response = bytearray()
-                    response += result.content  # 80 byte header
-                    response += bitcoinx.pack_be_uint32(current_best_height)
-                    asyncio.run_coroutine_threadsafe(ws_client.websocket.send_bytes(response),
-                        self.loop)
+                    request_headers = {'Accept': 'application/json'}
+                    request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
+                                    "id": 1}
+                    async with await session.post(url_to_fetch, headers=request_headers,
+                            json=request_body) as resp:
+                        assert resp.status == 200, resp.reason
+                        result = await resp.json()
+                        try:
+                            await ws_client.websocket.send_json(result)
+                        except ConnectionResetError:
+                            self.logger.error(f"Websocket disconnected")
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
         finally:
@@ -191,11 +204,8 @@ class ApplicationState(object):
                 for ws_id, ws_client in self.get_msg_box_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
                     if ws_client.msg_box_internal_id == notification['channel_id'].id:
-                        try:
-                            msg = json.dumps(notification['notification'])
-                            await ws_client.websocket.send_str(data=msg)
-                        except Exception as e:
-                            print("guioahoga")
+                        msg = json.dumps(notification['notification'])
+                        await ws_client.websocket.send_str(data=msg)
         except Exception:
             self.logger.exception("unexpected exception in message_box_notifications_task")
         finally:
@@ -226,7 +236,7 @@ async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
         raise ValidatorError(str(e))
 
 
-async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
+async def application_octet_stream(request: web.Request) -> Tuple[bytes, bool]:
     try:
         return await request.read(), True
     except ValueError as e:
@@ -234,7 +244,7 @@ async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
 
 
 async def multipart_mixed(request: web.Request) \
-        -> tuple[list[Optional[bytes]], bool]:
+        -> Tuple[List[Optional[bytes]], bool]:
     try:
         reader = aiohttp.MultipartReader(request.headers, content=request.content)
         values = []
@@ -246,7 +256,7 @@ async def multipart_mixed(request: web.Request) \
 
 
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> tuple[Application, str, int]:
+        port: int = SERVER_PORT) -> Tuple[Application, str, int]:
     loop = asyncio.get_event_loop()
     app = AiohttpApplication()
     app.cleanup_ctx.append(client_session_ctx)
@@ -343,14 +353,14 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     ]
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         app.routes.extend([
+            Route(web.view("/api/v1/headers/tips/websocket",
+                           HeadersWebSocket), False),
+            Route(web.get("/api/v1/headers/tips",
+                          handlers_headers.get_chain_tips), False),
             Route(web.get("/api/v1/headers/by-height",
                           handlers_headers.get_headers_by_height), True),
             Route(web.get("/api/v1/headers/{hash}",
                           handlers_headers.get_header), False),
-            Route(web.get("/api/v1/chain/tips",
-                          handlers_headers.get_chain_tips), False),
-            Route(web.view("/api/v1/chain/tips/websocket",
-                           HeadersWebSocket), False),
             Route(web.get("/api/v1/network/peers",
                           handlers_headers.get_peers), False),
         ])

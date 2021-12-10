@@ -620,7 +620,7 @@ paths:
           format: hex
     get:
       summary: Get a single raw block header
-      security: []
+      security: []  # no auth required
       tags:
         - HeaderSV APIs
       responses:
@@ -643,8 +643,7 @@ paths:
   /api/v1/headers/by-height:
     get:
       summary: Get a batch of headers by height & count
-      security:
-        - BearerAuth: [ ]
+      security: []  # no auth required
       parameters:
         - name: height
           in: query
@@ -685,7 +684,7 @@ paths:
           description: Service Unavailable - means the Header SV instance running in the backend is
             is offline.
 
-  /api/v1/chain/tips:
+  /api/v1/headers/tips:
     get:
       summary: Get chain tips
       security: []  # no auth required
@@ -714,7 +713,7 @@ paths:
                 $ref: "#/components/schemas/Peers"
 
 
-  /api/v1/chain/tips/websocket:
+  /api/v1/headers/tips/websocket:
     get:
       summary: Headers websocket
       security: []  # no auth required
@@ -725,9 +724,9 @@ paths:
           description: |
             Subscribe to websocket notifications of the new chain tip.
           content:
-            application/octet-stream:
+            application/json:
               schema:
-                $ref: "#/components/schemas/TipBinary"
+                $ref: "#/components/schemas/Tip"
 
 components:
   securitySchemes:

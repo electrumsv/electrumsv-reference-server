@@ -13,7 +13,7 @@ except ModuleNotFoundError:
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
 
-from typing import Optional, Union, List, Dict, Any
+from typing import Optional, Union, List, Dict, Any, Tuple
 import typing
 from datetime import datetime
 
@@ -223,7 +223,7 @@ class MsgBoxSQLiteRepository:
         return cur.execute(sql, (account_id, msg_box_externalid, token, description, canread,
                                  canwrite, validfrom))
 
-    def get_msg_box_tokens(self, msg_box_id: int) -> list[MsgBoxAPIToken]:
+    def get_msg_box_tokens(self, msg_box_id: int) -> List[MsgBoxAPIToken]:
         sql = f"""SELECT * FROM msg_box_api_token WHERE msg_box_id = ?;"""
         rows = self.db.execute(sql, params=(msg_box_id,))
         msg_box_api_tokens = []
@@ -271,7 +271,7 @@ class MsgBoxSQLiteRepository:
 
         return msg_box
 
-    def get_msg_boxes(self, account_id: int) -> list[MsgBox]:
+    def get_msg_boxes(self, account_id: int) -> List[MsgBox]:
         sql = f"""
             SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced, 
                    minagedays, maxagedays, autoprune, 
@@ -430,7 +430,7 @@ class MsgBoxSQLiteRepository:
         return False
 
     def write_message(self, message: Message) \
-            -> Union[tuple[int, view_models.MessageViewModelGet], Error]:
+            -> Union[Tuple[int, view_models.MessageViewModelGet], Error]:
         """Returns an error code and error reason"""
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()
@@ -557,7 +557,7 @@ class MsgBoxSQLiteRepository:
         return seq
 
     def get_messages(self, api_token_id: int, onlyunread: bool) \
-            -> Optional[tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
+            -> Optional[Tuple[List[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
                               Union[int, str]]]:
         connection = self.db.acquire_connection()
         cur: sqlite3.Cursor = connection.cursor()

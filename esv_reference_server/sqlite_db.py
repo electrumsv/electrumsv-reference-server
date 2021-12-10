@@ -242,7 +242,7 @@ class SQLiteDatabaseBase:
             self.logger.debug(f"Running sql: {query}")
             self.execute(query)
 
-    def get_tables(self) -> list[str]:
+    def get_tables(self) -> List[str]:
         sql = """SELECT name FROM sqlite_master WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
         return self.execute(sql)
 

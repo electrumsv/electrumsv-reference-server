@@ -59,6 +59,7 @@ class AiohttpServer:
 
     async def on_shutdown(self, app: web.Application) -> None:
         self.logger.debug("Cleaning up...")
+        await self.app_state.close_aiohttp_session()
         self.app.is_alive = False
         self.logger.debug("Stopped.")
 

@@ -17,9 +17,9 @@ from aiohttp.web_exceptions import HTTPClientError
 from esv_reference_server.errors import Error
 
 SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 52462
-WS_URL_HEADERS = f"http://localhost:{SERVER_PORT}/api/v1/chain/tips/websocket"
-WS_URL_TEMPLATE_MSG_BOX = "http://localhost:52462/api/v1/channel/{channelid}/notify"
+SERVER_PORT = 47124
+WS_URL_HEADERS = f"http://localhost:{SERVER_PORT}/api/v1/headers/tips/websocket"
+WS_URL_TEMPLATE_MSG_BOX = "http://localhost:47124/api/v1/channel/{channelid}/notify"
 
 
 class MockApplicationState:
@@ -39,11 +39,15 @@ class ElectrumSVClient:
             headers = {"Authorization": f"Bearer {api_token}"}
             async with session.ws_connect(WS_URL_HEADERS, headers=headers, timeout=5.0) as ws:
                 print(f'Connected to {WS_URL_HEADERS}')
-
                 async for msg in ws:
-                    new_tip_hash = bitcoinx.hash_to_hex_str(bitcoinx.double_sha256(msg.data[0:80]))
-                    new_tip_height = bitcoinx.unpack_be_uint32(msg.data[80:84])[0]
-                    print('Message new chain tip hash: ', new_tip_hash, 'height: ', new_tip_height)
+                    content = json.loads(msg.data)
+                    print('Message new chain tip hash: ', content)
+                    if isinstance(content, dict) and content.get('error'):
+                        error: Error = Error.from_websocket_dict(content)
+                        print(f"Websocket error: {error}")
+                        if error.status == web.HTTPUnauthorized.status_code:
+                            raise web.HTTPUnauthorized()
+
                     if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
 
@@ -74,6 +78,7 @@ class ElectrumSVClient:
 async def main() -> None:
     app_state = MockApplicationState()
     client = ElectrumSVClient(app_state)
+    REGTEST_VALID_ACCOUNT_TOKEN = "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
     msg_box_external_id = "Da7_p8OTF7LVPng2ZPjS9w1UOytL9_iRrAb0abAzpITG9QBGhgkGOjVcL7osUf4xQPrMV9FWin_SHrC5KJnkgQ=="
     msg_box_api_token = "N1FLVGfduRMKZl3X8h_eAqAyKr_RkJFoXqkHahUahP1wEH2A3Zi9xLJV5VxitYomYENo86CQXiCACjNzMJ-CsA=="
     url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=msg_box_external_id)
@@ -83,10 +88,10 @@ async def main() -> None:
             # NOTE: remember to set:
             #   EXPOSE_HEADER_SV_APIS=1 &
             #   HEADER_SV_URL=http://localhost:8080 in .env file
-            # await client.subscribe_to_headers_notifications(msg_box_api_token)
+            await client.subscribe_to_headers_notifications(REGTEST_VALID_ACCOUNT_TOKEN)
 
-            # Peer Channels
-            await client.subscribe_to_msg_box_notifications(url, msg_box_api_token)
+            # # Peer Channels
+            # await client.subscribe_to_msg_box_notifications(url, msg_box_api_token)
 
         except HTTPClientError as e:
             break

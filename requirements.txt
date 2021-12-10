@@ -2,4 +2,4 @@ bitcoinx
 requests>=2.21.0
 aiohttp
 aiohttp-swagger3
-dataclasses-json
+electrumsv-node

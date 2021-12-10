@@ -5,6 +5,7 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 import logging
 import time
@@ -437,10 +438,23 @@ async def get_endpoints_data(request: web.Request) -> web.Response:
                 "baseUrl": "/api/v1/account",
             },
             {
-                "apiType": "bsvapi.header",
+                "apiType": "bsvapi.channel",
+                "apiVersion": 1,
+                "baseUrl": "/api/v1/channel"
+            }
+        ]
+    }
+    if os.environ.get('EXPOSE_HEADER_SV_APIS'):
+        data['endpoints'].extend([
+            {
+                "apiType": "bsvapi.headers",
                 "apiVersion": 1,
                 "baseUrl": "/api/v1/headers",
             },
-        ]
-    }
+            {
+                "apiType": "bsvapi.network",
+                "apiVersion": 1,
+                "baseUrl": "/api/v1/network",
+            },
+        ])
     return web.json_response(data=data)
