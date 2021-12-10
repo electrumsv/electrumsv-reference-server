@@ -35,8 +35,45 @@ class TestAiohttpRESTAPI:
     def teardown_class(self) -> None:
         pass
 
+    def _assert_header_structure(self, header: dict):
+        assert isinstance(header['hash'], str)
+        assert len(header['hash']) == 64
+        assert isinstance(header['version'], int)
+        assert isinstance(header['prevBlockHash'], str)
+        assert len(header['prevBlockHash']) == 64
+        assert isinstance(header['merkleRoot'], str)
+        assert len(header['merkleRoot']) == 64
+        assert isinstance(header['creationTimestamp'], int)
+        assert isinstance(header['difficultyTarget'], int)
+        assert isinstance(header['nonce'], int)
+        assert isinstance(header['transactionCount'], int)
+        assert isinstance(header['work'], int)
+        assert isinstance(header['work'], int)
+
+    def _assert_tip_structure_correct(self, tip: dict) -> bool:
+        assert isinstance(tip, dict)
+        assert tip['header'] is not None
+        header = tip['header']
+        self._assert_header_structure(header)
+        assert tip['state'] == 'LONGEST_CHAIN'
+        assert isinstance(tip['chainWork'], int)
+        assert isinstance(tip['height'], int)
+        assert isinstance(tip['confirmations'], int)
+        return True
+
     pytest.mark.skipif(os.environ['EXPOSE_HEADER_SV_APIS'] == '0')
     def test_get_headers_by_height(self):
+        expected = [
+            {'hash': '0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206',
+             'version': 1,
+             'prevBlockHash': '0000000000000000000000000000000000000000000000000000000000000000',
+             'merkleRoot': '4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b',
+             'creationTimestamp': 1296688602,
+             'difficultyTarget': 545259519,
+             'nonce': 2,
+             'transactionCount': 0,
+             'work': 2}
+        ]
         route = API_ROUTE_DEFS['get_headers_by_height']
         self.logger.debug(f"test_get_headers_by_height url: {route.url}")
         result: requests.Response = _successful_call(route.url + "?height=0", route.http_method, None,
@@ -44,13 +81,28 @@ class TestAiohttpRESTAPI:
         if result.status_code == 503:
             pytest.skip(result.reason)
 
+        assert expected == result.json()
+
     def test_get_header(self):
+        expected = {
+            'hash': '0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206',
+            'version': 1,
+            'prevBlockHash': '0000000000000000000000000000000000000000000000000000000000000000',
+            'merkleRoot': '4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b',
+            'creationTimestamp': 1296688602,
+            'difficultyTarget': 545259519,
+            'nonce': 2,
+            'transactionCount': 0,
+            'work': 2
+        }
         route = API_ROUTE_DEFS['get_header']
         self.logger.debug(f"test_get_header url: {route.url}")
         result: requests.Response = _successful_call(route.url.format(hash=REGTEST_GENESIS_BLOCK_HASH),
             route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
         if result.status_code == 503:
             pytest.skip(result.reason)
+
+        assert expected == result.json()
 
     def test_get_chain_tips(self):
         route = API_ROUTE_DEFS['get_chain_tips']
@@ -60,6 +112,10 @@ class TestAiohttpRESTAPI:
         if result.status_code == 503:
             pytest.skip(result.reason)
 
+        response_json = result.json()
+        assert isinstance(response_json, list)
+        self._assert_tip_structure_correct(response_json[0])
+
 
     def test_get_peers(self):
         route = API_ROUTE_DEFS['get_peers']
@@ -68,6 +124,10 @@ class TestAiohttpRESTAPI:
             route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
         if result.status_code == 503:
             pytest.skip(result.reason)
+
+        for peer in result.json():
+            assert isinstance(peer['ip'], str)
+            assert isinstance(peer['port'], int)
 
     def test_channels_websocket(self):
         logger = logging.getLogger("websocket--headers-test")
@@ -91,6 +151,8 @@ class TestAiohttpRESTAPI:
                             self.logger.info(f"Websocket error: {error}")
                             if error.status == web.HTTPUnauthorized.status_code:
                                 raise web.HTTPUnauthorized()
+
+                        self._assert_header_structure(content)
 
                         count += 1
                         if count == expected_count:

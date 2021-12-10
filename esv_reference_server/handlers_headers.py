@@ -2,7 +2,6 @@ import logging
 import uuid
 
 import aiohttp
-import bitcoinx
 import typing
 from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse

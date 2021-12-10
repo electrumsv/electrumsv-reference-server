@@ -8,7 +8,6 @@ from pathlib import Path
 
 import aiohttp
 import bitcoinx
-import requests
 from aiohttp import web
 import asyncio
 import os
@@ -95,12 +94,12 @@ class ApplicationState(object):
         with self.headers_ws_clients_lock:
             del self.headers_ws_clients[ws_client.ws_id]
 
-    async def _get_aiohttp_session(self):
+    async def _get_aiohttp_session(self) -> aiohttp.ClientSession:
         if not self.aiohttp_session:
             self.aiohttp_session = aiohttp.ClientSession()
         return self.aiohttp_session
 
-    async def close_aiohttp_session(self):
+    async def close_aiohttp_session(self) -> None:
         if self.aiohttp_session:
             await self.aiohttp_session.close()
 
