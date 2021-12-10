@@ -95,10 +95,10 @@ at startup from file.
 
 Endpoint                                                   | Method | Auth?  | Description
  --------------------------------------------------------- | ------ | ------ | -----------         
- `/api/v1/headers/{hash}`                                  | GET    | Yes    | Get a single raw block header by hash
- `/api/v1/headers/by-height/?height=<height>&count=<count>`| GET    | Yes    | Get a batch of headers by height & count
- `/api/v1/chain/tips/websocket`                            | GET    | No     | Get chain tips
- `/api/v1/chain/tips`                                      | GET    | No     | Subscribe to websocket notifications of the new chain tip
+ `/api/v1/headers/{hash}`                                  | GET    | No    | Get a single raw block header by hash
+ `/api/v1/headers/by-height/?height=<height>&count=<count>`| GET    | No    | Get a batch of headers by height & count
+ `/api/v1/headers/tips/websocket`                          | GET    | No     | Get chain tips
+ `/api/v1/headers/tips`                                    | GET    | No     | Subscribe to websocket notifications of the new chain tip
  `/api/v1/network/peers`                                   | GET    | No     | Get bitcoin daemon network peers of the running HeaderSV instance
 
 
