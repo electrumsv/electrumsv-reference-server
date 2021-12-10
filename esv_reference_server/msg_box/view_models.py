@@ -5,7 +5,7 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TypedDict, Dict, Any, Union, cast
+from typing import TypedDict, Dict, Any, Union, cast, List
 
 from esv_reference_server.msg_box.models import MsgBox
 
@@ -16,7 +16,7 @@ class RetentionViewModelJSON(TypedDict):
     auto_prune: bool
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class RetentionViewModel:
     min_age_days: int
     max_age_days: int
@@ -39,7 +39,7 @@ class MsgBoxAPITokenViewModelGet:
     can_write: bool
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class MsgBoxViewModelCreate:
     public_read: bool
     public_write: bool
@@ -77,7 +77,7 @@ class MsgBoxViewModelAmend:
         return klass
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class MsgBoxViewModelGet:
     id: str
     href: str
@@ -87,7 +87,7 @@ class MsgBoxViewModelGet:
     locked: bool
     head_sequence: int
     retention: RetentionViewModel
-    access_tokens: list[MsgBoxAPITokenViewModelGet]
+    access_tokens: List[MsgBoxAPITokenViewModelGet]
 
     @classmethod
     def from_msg_box(cls, msg_box: MsgBox, href: str) -> 'MsgBoxViewModelGet':
@@ -111,7 +111,7 @@ class MsgBoxViewModelGet:
             retention=retention, access_tokens=api_tokens)
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class APITokenViewModelCreate:
     description: str
     can_read: bool
@@ -126,7 +126,7 @@ class APITokenViewModelGetJSON(TypedDict):
     can_write: bool
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class APITokenViewModelGet:
     id: str
     token: str
@@ -154,7 +154,7 @@ class MessageViewModelGetBinary(TypedDict):
     payload: str  # hex
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class MessageViewModelGet:
     sequence: int
     received: datetime

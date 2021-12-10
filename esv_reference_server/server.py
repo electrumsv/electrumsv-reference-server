@@ -14,7 +14,7 @@ import os
 import logging
 import queue
 import threading
-from typing import AsyncIterator, Dict, Tuple, Optional, Any
+from typing import AsyncIterator, Dict, Tuple, Optional, Any, List
 
 from aiohttp.web_app import Application
 
@@ -48,8 +48,8 @@ class AiohttpApplication(web.Application):
     def __init__(self) -> None:
         super().__init__()
         self.is_alive: bool = False
-        self.routes: list[Route] = []
-        self.API_ROUTE_DEFS: dict[str, EndpointInfo] = {}
+        self.routes: List[Route] = []
+        self.API_ROUTE_DEFS: Dict[str, EndpointInfo] = {}
 
 
 class ApplicationState(object):
@@ -67,7 +67,7 @@ class ApplicationState(object):
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
+        self.msg_box_new_msg_queue: asyncio.Queue[Tuple[int, PushNotification]] = asyncio.Queue()
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
@@ -236,7 +236,7 @@ async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
         raise ValidatorError(str(e))
 
 
-async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
+async def application_octet_stream(request: web.Request) -> Tuple[bytes, bool]:
     try:
         return await request.read(), True
     except ValueError as e:
@@ -244,7 +244,7 @@ async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
 
 
 async def multipart_mixed(request: web.Request) \
-        -> tuple[list[Optional[bytes]], bool]:
+        -> Tuple[List[Optional[bytes]], bool]:
     try:
         reader = aiohttp.MultipartReader(request.headers, content=request.content)
         values = []
@@ -256,7 +256,7 @@ async def multipart_mixed(request: web.Request) \
 
 
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> tuple[Application, str, int]:
+        port: int = SERVER_PORT) -> Tuple[Application, str, int]:
     loop = asyncio.get_event_loop()
     app = AiohttpApplication()
     app.cleanup_ctx.append(client_session_ctx)

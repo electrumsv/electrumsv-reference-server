@@ -55,9 +55,7 @@ jobs:
       displayName: 'Mypy static analysis'
 
     - script: |
-        coverage run --parallel-mode -m pytest unittests --verbose
-        coverage combine --append
-        coverage report -m
+        pytest --cov=esv_reference_server unittests --verbose
       continueOnError: true
       displayName: 'Pytest with Coverage report'
 
@@ -85,9 +83,7 @@ jobs:
     displayName: 'Install Electrumsv Reference Server'
 
   - script: |
-      coverage run --parallel-mode -m pytest unittests --verbose
-      coverage combine --append
-      coverage report -m
+      pytest --cov=esv_reference_server unittests --verbose
     continueOnError: true
     displayName: 'Pytest with Coverage report'
 
@@ -115,8 +111,6 @@ jobs:
       displayName: 'Install Electrumsv Reference Server'
 
     - script: |
-        coverage run --parallel-mode -m pytest unittests --verbose
-        coverage combine --append
-        coverage report -m
+        pytest --cov=esv_reference_server unittests --verbose
       continueOnError: true
       displayName: 'Pytest with Coverage report'

@@ -4,16 +4,16 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NamedTuple, Optional, TypedDict
+from typing import NamedTuple, Optional, TypedDict, List
 
 
-@dataclass(slots=True)  # type: ignore # mypy will support typing of this in the next release
+@dataclass()
 class MsgBoxAPIToken:
     id: int
     account_id: int
     msg_box_id: int
     token: str  # 64 byte base64.urlsafe_b64decode
-    # fcm_tokens: list[FCMToken] - not implemented
+    # fcm_tokens: List[FCMToken] - not implemented
     description: str
     can_read: bool
     can_write: bool
@@ -33,7 +33,7 @@ class MsgBox(NamedTuple):
     min_age_days: int
     max_age_days: int
     autoprune: bool
-    api_tokens: list[MsgBoxAPIToken]
+    api_tokens: List[MsgBoxAPIToken]
     head_message_sequence: int
 
 

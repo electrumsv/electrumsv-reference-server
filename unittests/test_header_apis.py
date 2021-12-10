@@ -2,11 +2,13 @@ import asyncio
 import json
 import logging
 import os
+from typing import Union, Dict
 
 import aiohttp
 import bitcoinx
 import pytest
 import requests
+from _pytest.outcomes import Skipped
 from aiohttp import web
 from electrumsv_node import electrumsv_node
 
@@ -35,7 +37,7 @@ class TestAiohttpRESTAPI:
     def teardown_class(self) -> None:
         pass
 
-    def _assert_header_structure(self, header: dict):
+    def _assert_header_structure(self, header: Dict) -> bool:
         assert isinstance(header['hash'], str)
         assert len(header['hash']) == 64
         assert isinstance(header['version'], int)
@@ -49,8 +51,9 @@ class TestAiohttpRESTAPI:
         assert isinstance(header['transactionCount'], int)
         assert isinstance(header['work'], int)
         assert isinstance(header['work'], int)
+        return True
 
-    def _assert_tip_structure_correct(self, tip: dict) -> bool:
+    def _assert_tip_structure_correct(self, tip: Dict) -> bool:
         assert isinstance(tip, dict)
         assert tip['header'] is not None
         header = tip['header']
@@ -116,7 +119,6 @@ class TestAiohttpRESTAPI:
         assert isinstance(response_json, list)
         self._assert_tip_structure_correct(response_json[0])
 
-
     def test_get_peers(self):
         route = API_ROUTE_DEFS['get_peers']
         self.logger.debug(f"test_get_peers url: {route.url}")
@@ -135,7 +137,7 @@ class TestAiohttpRESTAPI:
             await subscribe_to_headers_notifications(api_token, expected_count, completion_event)
 
         async def subscribe_to_headers_notifications(api_token: str, expected_count: int,
-                completion_event: asyncio.Event) -> None:
+                completion_event: asyncio.Event) -> Union[bool, Skipped]:
             count = 0
             async with aiohttp.ClientSession() as session:
                 headers = {"Authorization": f"Bearer {api_token}"}
@@ -149,16 +151,22 @@ class TestAiohttpRESTAPI:
                         if isinstance(content, dict) and content.get('error'):
                             error: Error = Error.from_websocket_dict(content)
                             self.logger.info(f"Websocket error: {error}")
+                            if error.status == web.HTTPServiceUnavailable.status_code:  # 503
+                                completion_event.set()
+                                return pytest.skip(error.reason, allow_module_level=True)
+
                             if error.status == web.HTTPUnauthorized.status_code:
                                 raise web.HTTPUnauthorized()
 
-                        self._assert_header_structure(content)
+                        result = self._assert_header_structure(content)
+                        if not result:
+                            return False
 
                         count += 1
                         if count == expected_count:
                             logger.info(f"Received {expected_count} headers successfully")
                             completion_event.set()
-                            return
+                            return result
                         if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
 
@@ -173,16 +181,20 @@ class TestAiohttpRESTAPI:
                             assert resp.status == 200, resp.reason
                     await asyncio.sleep(2)
                 except aiohttp.ClientConnectorError:
-                    pytest.skip("Bitcoin Regtest node unavailable")
+                    return "SKIP"
 
         async def main():
-            EXPECTED_MSG_COUNT = 3
+            EXPECTED_MSG_COUNT = 2
 
             completion_event = asyncio.Event()
-            asyncio.create_task(wait_on_sub(TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
+            fut1 = asyncio.create_task(wait_on_sub(TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
                 completion_event))
             await asyncio.sleep(3)
-            await mine_blocks(EXPECTED_MSG_COUNT)
+            result = await mine_blocks(EXPECTED_MSG_COUNT)
+            if result == "SKIP":
+                fut1.cancel()
+                return pytest.skip("Bitcoin Regtest node unavailable")
             await completion_event.wait()
+            fut1.result()  # skip or pass
 
         asyncio.run(main())

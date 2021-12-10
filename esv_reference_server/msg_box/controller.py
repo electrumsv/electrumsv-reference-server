@@ -11,7 +11,7 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, List, Dict, Tuple
 
 import aiohttp
 from aiohttp import web
@@ -70,7 +70,7 @@ def _auth_for_channel_token(request: web.Request, handler_name: str, token: str,
 
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
-    API_ROUTE_DEFS: dict[str, EndpointInfo] = request.app.API_ROUTE_DEFS  # type: ignore
+    API_ROUTE_DEFS: Dict[str, EndpointInfo] = request.app.API_ROUTE_DEFS  # type: ignore
     get_messages_url = API_ROUTE_DEFS['get_messages'].url.format(
         channelid=msg_box.external_id)
     get_messages_href = get_messages_url
@@ -97,7 +97,7 @@ async def list_channels(request: web.Request) -> web.Response:
     account_id = 0
     logger.info(f"Get list of message boxes for accountid: {account_id}.")
 
-    msg_boxes: list[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
+    msg_boxes: List[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
     result = []
     for msg_box in msg_boxes:
         msg_box_view_get = _msg_box_get_view(request, msg_box)
@@ -458,8 +458,8 @@ def _get_messages_head(external_id: str, msg_box_api_token: str,
 
 def _get_messages(channelid: str, api_token_id: int, onlyunread: bool, accept_type: str,
         msg_box_repository: MsgBoxSQLiteRepository) \
-            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
-                     dict[str, str]]:
+            -> Tuple[List[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
+                     Dict[str, str]]:
     logger.info(f"Get messages for channel_id: {channelid}.")
     # Todo - use a generator here and sequentially write the messages out to a streamed response
     result = msg_box_repository.get_messages(api_token_id, onlyunread)

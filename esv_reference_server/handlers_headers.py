@@ -163,7 +163,8 @@ class HeadersWebSocket(web.View):
         except aiohttp.ClientConnectorError as e:
             # When HeaderSV comes back online there will be a compensating chain tip notification
             self.logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
-            pass
+            raise Error(reason=f"HeaderSV service is unavailable on {app_state.header_sv_url}",
+                        status=503)
 
     async def _handle_new_connection(self, client: HeadersWSClient) -> None:
         self.ws_clients = self.request.app['headers_ws_clients']
