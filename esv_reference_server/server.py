@@ -353,14 +353,14 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     ]
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         app.routes.extend([
+            Route(web.view("/api/v1/headers/tips/websocket",
+                           HeadersWebSocket), False),
+            Route(web.get("/api/v1/headers/tips",
+                          handlers_headers.get_chain_tips), False),
             Route(web.get("/api/v1/headers/by-height",
                           handlers_headers.get_headers_by_height), True),
             Route(web.get("/api/v1/headers/{hash}",
                           handlers_headers.get_header), False),
-            Route(web.get("/api/v1/chain/tips",
-                          handlers_headers.get_chain_tips), False),
-            Route(web.view("/api/v1/chain/tips/websocket",
-                           HeadersWebSocket), False),
             Route(web.get("/api/v1/network/peers",
                           handlers_headers.get_peers), False),
         ])

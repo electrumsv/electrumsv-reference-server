@@ -16,7 +16,7 @@ from esv_reference_server.errors import Error
 from unittests.conftest import API_ROUTE_DEFS, _successful_call, TEST_MASTER_BEARER_TOKEN, TEST_PORT
 
 REGTEST_GENESIS_BLOCK_HASH = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
-WS_URL_HEADERS = f"http://localhost:{TEST_PORT}/api/v1/chain/tips/websocket"
+WS_URL_HEADERS = f"http://localhost:{TEST_PORT}/api/v1/headers/tips/websocket"
 
 
 class TestAiohttpRESTAPI:

@@ -18,7 +18,7 @@ from esv_reference_server.errors import Error
 
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 47124
-WS_URL_HEADERS = f"http://localhost:{SERVER_PORT}/api/v1/chain/tips/websocket"
+WS_URL_HEADERS = f"http://localhost:{SERVER_PORT}/api/v1/headers/tips/websocket"
 WS_URL_TEMPLATE_MSG_BOX = "http://localhost:47124/api/v1/channel/{channelid}/notify"
 
 

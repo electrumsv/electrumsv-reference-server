@@ -684,7 +684,7 @@ paths:
           description: Service Unavailable - means the Header SV instance running in the backend is
             is offline.
 
-  /api/v1/chain/tips:
+  /api/v1/headers/tips:
     get:
       summary: Get chain tips
       security: []  # no auth required
@@ -713,7 +713,7 @@ paths:
                 $ref: "#/components/schemas/Peers"
 
 
-  /api/v1/chain/tips/websocket:
+  /api/v1/headers/tips/websocket:
     get:
       summary: Headers websocket
       security: []  # no auth required

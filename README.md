@@ -126,12 +126,24 @@ Follow these instructions: https://github.com/peter-evans/swagger-github-pages
 
 
 ## Running The ElectrumSV Reference Server
-On windows:
-
+On windows (requires python3.10):
+    
+    # Python packages
     pip install -r requirements.txt
+    
+    # Run the server
     py server.py
 
-On unix:
-
-    pip3 install -r requirements.txt
-    python3 server.py
+On unix (requires python3.10):
+    
+    # System Dependencies
+    sudo apt-get update
+    sudo apt-get install libusb-1.0-0-dev libudev-dev
+    python3.10 -m pip install -U pysqlite3-binary
+    python3.10 -c "import pysqlite3; print(pysqlite3.sqlite_version)"
+    
+    # Python packages
+    python3.10 -m pip3 install -r requirements.txt
+    
+    # Run the server
+    python3.10 server.py
