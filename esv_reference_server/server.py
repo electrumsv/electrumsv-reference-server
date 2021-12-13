@@ -4,6 +4,8 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 
 import json
+import time
+from datetime import datetime
 from pathlib import Path
 
 import aiohttp
@@ -20,9 +22,10 @@ from aiohttp.web_app import Application
 
 from esv_reference_server.handlers_headers import HeadersWebSocket
 from esv_reference_server.msg_box.controller import MsgBoxWebSocket
-from esv_reference_server.msg_box.models import PushNotification
 from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
-from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient, Route, EndpointInfo
+from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient, Route, EndpointInfo, \
+    GeneralWSClient, GeneralNotification, PushNotification
+from esv_reference_server.websock import GeneralWebSocket
 from .constants import Network, SERVER_HOST, SERVER_PORT
 
 from .keys import create_regtest_server_keys, ServerKeys
@@ -61,9 +64,12 @@ class ApplicationState(object):
         self.app = app
         self.loop = loop
 
+        self.general_ws_clients: Dict[str, GeneralWSClient] = {}
+        self.general_ws_clients_lock: threading.RLock = threading.RLock()
+        self.general_ws_queue: asyncio.Queue[Tuple[int, GeneralNotification]] = asyncio.Queue()
+
         self.headers_ws_clients: Dict[str, HeadersWSClient] = {}
         self.headers_ws_clients_lock: threading.RLock = threading.RLock()
-        self.headers_ws_queue: queue.Queue[str] = queue.Queue()  # json only
 
         self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
@@ -77,20 +83,21 @@ class ApplicationState(object):
         self.aiohttp_session: Optional[aiohttp.ClientSession] = None
 
     def start_tasks(self) -> None:
+        asyncio.create_task(self.general_notifications_task())
         asyncio.create_task(self.message_box_notifications_task())
         if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
             asyncio.create_task(self.header_notifications_task())
 
     # Headers Websocket Client Get/Add/Remove & Notify thread
-    def get_ws_clients(self) -> Dict[str, HeadersWSClient]:
+    def get_headers_ws_clients(self) -> Dict[str, HeadersWSClient]:
         with self.headers_ws_clients_lock:
             return self.headers_ws_clients
 
-    def add_ws_client(self, ws_client: HeadersWSClient) -> None:
+    def add_headers_ws_client(self, ws_client: HeadersWSClient) -> None:
         with self.headers_ws_clients_lock:
             self.headers_ws_clients[ws_client.ws_id] = ws_client
 
-    def remove_ws_client(self, ws_client: HeadersWSClient) -> None:
+    def remove_headers_ws_client(self, ws_client: HeadersWSClient) -> None:
         with self.headers_ws_clients_lock:
             del self.headers_ws_clients[ws_client.ws_id]
 
@@ -144,24 +151,34 @@ class ApplicationState(object):
                     logger.exception(e)
                     continue
 
-                if not len(self.get_ws_clients()):
+                if not len(self.get_headers_ws_clients()) and not len(self.get_ws_clients()):
                     continue
+
+                url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
+                request_headers = {'Accept': 'application/json'}
+                request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
+                                "id": 1}
+                async with await session.post(url_to_fetch, headers=request_headers,
+                                              json=request_body) as resp:
+                    assert resp.status == 200, resp.reason
+                    result = await resp.json()
+
+                # Send new tip notification to all connected websocket clients
+                for ws_id, ws_client in self.get_headers_ws_clients().items():
+                    try:
+                        self.logger.debug(f"Sending msg to header websocket client ws_id: {ws_client.ws_id}")
+                        await ws_client.websocket.send_json(result)
+                    except ConnectionResetError:
+                        self.logger.error(f"Websocket disconnected")
 
                 # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client in self.get_ws_clients().items():
-                    self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
-                    request_headers = {'Accept': 'application/json'}
-                    request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
-                                    "id": 1}
-                    async with await session.post(url_to_fetch, headers=request_headers,
-                            json=request_body) as resp:
-                        assert resp.status == 200, resp.reason
-                        result = await resp.json()
-                        try:
-                            await ws_client.websocket.send_json(result)
-                        except ConnectionResetError:
-                            self.logger.error(f"Websocket disconnected")
+                    try:
+                        self.logger.debug(f"Sending msg to general websocket client ws_id: {ws_client.ws_id}")
+                        await ws_client.websocket.send_json(
+                            GeneralNotification(message_type="bsvapi.headers.tip", result=result))
+                    except ConnectionResetError:
+                        self.logger.error(f"Websocket disconnected")
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
         finally:
@@ -189,7 +206,7 @@ class ApplicationState(object):
             while self.app.is_alive:
                 try:
                     msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
-                    self.logger.debug(f"Got peer channel notification... {notification}")
+                    self.logger.debug(f"Got peer channel notification: {notification}")
                 except Exception as e:
                     logger.exception(e)
                     continue
@@ -199,14 +216,56 @@ class ApplicationState(object):
 
                 # Send new message notifications to the relevant (and authenticated)
                 # websocket client (based on msg_box_id)
-                # Todo - for efficiency there needs to be a key: value cache to
-                #  lookup the relevant clients - iterating over all clients is poor form...
+                # Todo - key: value cache to lookup the relevant client
                 for ws_id, ws_client in self.get_msg_box_ws_clients().items():
                     self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    if ws_client.msg_box_internal_id == notification['channel_id'].id:
-                        msg = json.dumps(notification['notification'])
-                        await ws_client.websocket.send_str(data=msg)
+                    if ws_client.msg_box_internal_id == notification['channel_id']:
+                        try:
+                            msg = json.dumps(notification['notification'])
+                            await ws_client.websocket.send_str(data=msg)
+                        except ConnectionResetError as e:
+                            self.logger.error(f"Websocket disconnected")
+
         except Exception:
+            self.logger.exception("unexpected exception in message_box_notifications_task")
+        finally:
+            self.logger.info("Closing push notifications thread")
+
+    # General Websocket Client Get/Add/Remove & Notify thread
+    def get_ws_clients(self) -> Dict[str, GeneralWSClient]:
+        with self.general_ws_clients_lock:
+            return self.general_ws_clients
+
+    def add_ws_client(self, ws_client: GeneralWSClient) -> None:
+        with self.general_ws_clients_lock:
+            self.general_ws_clients[ws_client.ws_id] = ws_client
+
+    def remove_ws_client(self, ws_client: GeneralWSClient) -> None:
+        with self.general_ws_clients_lock:
+            del self.general_ws_clients[ws_client.ws_id]
+
+    async def general_notifications_task(self) -> None:
+        """Emits any notifications from the queue to all connected websockets"""
+        try:
+            ws_client: GeneralWSClient
+            while self.app.is_alive:
+                try:
+                    account_id, notification = await self.general_ws_queue.get()
+                    self.logger.debug(f"Got general websocket notification: {notification}")
+                except Exception as e:
+                    logger.exception(e)
+                    continue
+
+                # Send new message notifications to the relevant (and authenticated)
+                # websocket client (based on msg_box_id)
+                # Todo - key: value cache to lookup the relevant client
+                for ws_id, ws_client in self.get_ws_clients().items():
+                    self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
+                    msg = json.dumps(notification)
+                    try:
+                        await ws_client.websocket.send_str(data=msg)
+                    except ConnectionResetError as e:
+                        self.logger.error(f"Websocket disconnected")
             self.logger.exception("unexpected exception in message_box_notifications_task")
         finally:
             self.logger.info("Closing push notifications thread")
@@ -285,6 +344,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app['app_state'] = app_state
     app['headers_ws_clients'] = app_state.headers_ws_clients
     app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
+    app['general_ws_clients'] = app_state.general_ws_clients
 
     swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
         swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
@@ -350,6 +410,9 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
         # Message Box Websocket API
         Route(web.view("/api/v1/channel/{channelid}/notify",
                        MsgBoxWebSocket), True),
+
+        # General-Purpose consolidated Websocket - Requires master bearer token
+        Route(web.view("/api/v1/web-socket", GeneralWebSocket), True)
     ]
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         app.routes.extend([

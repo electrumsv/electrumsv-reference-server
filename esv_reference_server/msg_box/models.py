@@ -76,9 +76,3 @@ class MessageMetadata(NamedTuple):
     msg_box_api_token_id: int
     content_type: str
     received_ts: datetime
-
-
-class PushNotification(TypedDict):
-    channel_id: MsgBox
-    notification: str
-    received: datetime
