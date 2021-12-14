@@ -1,6 +1,17 @@
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple, TypedDict, Union
 
+import typing
 from aiohttp import web
+
+if typing.TYPE_CHECKING:
+    from esv_reference_server.msg_box.models import MsgBox
+
+
+class GeneralWSClient(NamedTuple):
+    ws_id: str
+    websocket: web.WebSocketResponse
+    account_id: int
+    accept_type: str  # application/json or application/octet-stream
 
 
 class HeadersWSClient(NamedTuple):
@@ -12,7 +23,6 @@ class MsgBoxWSClient(NamedTuple):
     ws_id: str
     websocket: web.WebSocketResponse
     msg_box_internal_id: int
-    accept_type: str  # http 'Accept' header (i.e. application/json vs application/octet-stream)
 
 
 class Route(NamedTuple):
@@ -29,3 +39,40 @@ class EndpointInfo(NamedTuple):
     http_method: str
     url: str
     auth_required: bool
+
+
+class Header(TypedDict):
+    hash: str
+    version: int
+    prevBlockHash: str
+    merkleRoot: str
+    creationTimestamp: int
+    difficultyTarget: int
+    nonce: int
+    transactionCount: int
+    work: int
+
+
+class PushNotification(TypedDict):
+    msg_box: 'MsgBox'
+    notification: str
+
+
+class TipNotification(TypedDict):
+    header: Header
+    state: str
+    chainWork: int
+    height: int
+
+
+class ChannelNotification(TypedDict):
+    id: str
+    notification: str
+
+
+class GeneralNotification(TypedDict):
+    message_type: str
+    result: Union[
+        TipNotification,
+        ChannelNotification
+    ]

@@ -1,7 +1,7 @@
 import asyncio
 
 import aiohttp
-from aiohttp import web
+from aiohttp import web, WSServerHandshakeError
 from aiohttp.web_app import Application
 import base64
 from bitcoinx import PrivateKey, PublicKey
@@ -14,15 +14,15 @@ import threading
 from pathlib import Path
 import requests
 
-from esv_reference_server.errors import Error
+from esv_reference_server.errors import Error, WebsocketUnauthorizedException
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from server import logger, AiohttpServer, get_app
 from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
-    API_ROUTE_DEFS, app
+    API_ROUTE_DEFS, app, WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 52462
-WS_URL_TEMPLATE_MSG_BOX = "http://localhost:52462/api/v1/channel/{channelid}/notify"
+WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:52462/api/v1/channel/{channelid}/notify"
 
 PRIVATE_KEY_1 = PrivateKey.from_hex(
     "720f1987db69efa562b3dabd78e51f19bd8da76c70ad839b72b939f4071b144b")
@@ -510,30 +510,20 @@ class TestAiohttpRESTAPI:
         assert result.status_code == 404, result.reason
         assert result.reason is not None
 
-    def test_channels_websocket(self):
-        logger = logging.getLogger("websocket-test")
-        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int, completion_event: asyncio.Event):
-            await subscribe_to_msg_box_notifications(url, msg_box_api_token, expected_count, completion_event)
+    async def _subscribe_to_msg_box_notifications(self, url: str, msg_box_api_token: str,
+            expected_count: int, completion_event: asyncio.Event) -> None:
 
-        async def subscribe_to_msg_box_notifications(url: str, msg_box_api_token: str,
-                expected_count: int, completion_event: asyncio.Event) -> None:
+        count = 0
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.ws_connect(url + f"?token={msg_box_api_token}", timeout=5.0) as ws:
 
-            count = 0
-            async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Bearer {msg_box_api_token}"}
-                async with session.ws_connect(url, headers=headers, timeout=5.0) as ws:
                     self.logger.info(f'Connected to {url}')
                     async for msg in ws:
                         msg: aiohttp.WSMessage
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             content = json.loads(msg.data)
                             self.logger.info(f'New message from msg box: {content}')
-
-                            if isinstance(content, dict) and content.get('error'):
-                                error: Error = Error.from_websocket_dict(content)
-                                self.logger.info(f"Websocket error: {error}")
-                                if error.status == web.HTTPUnauthorized.status_code:
-                                    raise web.HTTPUnauthorized()
 
                             count += 1
                             if expected_count == count:
@@ -546,6 +536,31 @@ class TestAiohttpRESTAPI:
                                         aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
                             self.logger.info("CLOSED")
                             break
+            except WSServerHandshakeError as e:
+                if e.status == 401:
+                    raise WebsocketUnauthorizedException()
+
+
+    def test_channels_websocket_bad_auth_should_fail(self):
+        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int, completion_event: asyncio.Event):
+            try:
+                await self._subscribe_to_msg_box_notifications(url, msg_box_api_token, expected_count, completion_event)
+            except WebsocketUnauthorizedException:
+                self.logger.debug(f"Websocket unauthorized - bad token")
+                assert True  # Auth should failed
+
+        completion_event = asyncio.Event()
+        url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
+        asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
+
+    def test_channels_websocket(self):
+        logger = logging.getLogger("websocket-test")
+        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int, completion_event: asyncio.Event):
+            try:
+                await self._subscribe_to_msg_box_notifications(url, msg_box_api_token, expected_count, completion_event)
+            except WebsocketUnauthorizedException:
+                self.logger.debug(f"Auth failed")
+                assert False  # Auth should have passed
 
         async def push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, expected_msg_count: int):
             for i in range(expected_msg_count):
@@ -570,9 +585,69 @@ class TestAiohttpRESTAPI:
 
             completion_event = asyncio.Event()
             url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
-            asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
+            task1 = asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
             await asyncio.sleep(3)
-            asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
+            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
+            await asyncio.gather(task1, task2)
+            await completion_event.wait()
+
+        asyncio.run(main())
+
+    def test_general_purpose_websocket_bad_auth_should_fail(self):
+        async def wait_on_sub(url: str, api_token: str,
+                              expected_count: int, completion_event: asyncio.Event):
+            try:
+                await _subscribe_to_general_notifications_peer_channels(url,
+                    api_token, expected_count, completion_event)
+            except WebsocketUnauthorizedException:
+                self.logger.debug(f"Websocket unauthorized - bad token")
+                assert True  # Auth should failed
+
+        completion_event = asyncio.Event()
+        url = WS_URL_GENERAL
+        asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
+
+    def test_general_purpose_websocket_peer_channel_notifications(self):
+        logger = logging.getLogger("websocket-test")
+        async def wait_on_sub(url: str, api_token: str, expected_count: int,
+                completion_event: asyncio.Event):
+            try:
+                await _subscribe_to_general_notifications_peer_channels(
+                    url, api_token, expected_count, completion_event)
+            except WebsocketUnauthorizedException:
+                self.logger.debug(f"Auth failed")
+                assert False  # Auth should have passed
+
+        async def push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, expected_msg_count: int):
+            for i in range(expected_msg_count):
+                headers = {}
+                headers["Content-Type"] = "application/json"
+                headers["Authorization"] = f"Bearer {CHANNEL_BEARER_TOKEN}"
+                request_body = {"key": "value"}
+
+                url = f"http://127.0.0.1:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+
+                async with aiohttp.ClientSession() as session:
+                    headers = {"Authorization": f"Bearer {CHANNEL_BEARER_TOKEN}"}
+
+                    async with session.post(url, headers=headers, json=request_body) as resp:
+                        self.logger.debug(f"push_messages = {await resp.json()}")
+                        assert resp.status == 200, resp.reason
+
+        async def main():
+            EXPECTED_MSG_COUNT = 10
+            logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
+            logger.debug(f"CHANNEL_BEARER_TOKEN: {CHANNEL_BEARER_TOKEN}")
+            logger.debug(f"CHANNEL_READ_ONLY_TOKEN: {CHANNEL_READ_ONLY_TOKEN}")
+
+            completion_event = asyncio.Event()
+            url = WS_URL_GENERAL
+            task1 = asyncio.create_task(wait_on_sub(url, TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
+                completion_event))
+            await asyncio.sleep(3)
+            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
+                EXPECTED_MSG_COUNT))
+            await asyncio.gather(task1, task2)
             await completion_event.wait()
 
         asyncio.run(main())

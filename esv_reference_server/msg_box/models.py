@@ -4,7 +4,7 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NamedTuple, Optional, TypedDict, List
+from typing import NamedTuple, Optional, List
 
 
 @dataclass()
@@ -76,9 +76,3 @@ class MessageMetadata(NamedTuple):
     msg_box_api_token_id: int
     content_type: str
     received_ts: datetime
-
-
-class PushNotification(TypedDict):
-    channel_id: MsgBox
-    notification: str
-    received: datetime

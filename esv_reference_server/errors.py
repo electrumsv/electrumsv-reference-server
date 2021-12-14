@@ -9,6 +9,10 @@ from aiohttp.web_exceptions import HTTPForbidden, HTTPBadRequest, HTTPConflict
 from esv_reference_server.types import WebsocketError
 
 
+class WebsocketUnauthorizedException(Exception):
+    pass
+
+
 class Error(Exception):
 
     def __init__(self, reason: str, status: int):
