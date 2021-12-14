@@ -441,6 +441,11 @@ async def get_endpoints_data(request: web.Request) -> web.Response:
                 "apiType": "bsvapi.channel",
                 "apiVersion": 1,
                 "baseUrl": "/api/v1/channel"
+            },
+            {
+                "apiType": "bsvapi.websocket",
+                "apiVersion": 1,
+                "baseUrl": "/api/v1/web-socket"
             }
         ]
     }

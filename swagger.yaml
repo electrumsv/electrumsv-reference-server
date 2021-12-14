@@ -40,16 +40,27 @@ paths:
                   endpoints:
                     type: array
                     items:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          apiType:
-                            type: string
-                          apiVersion:
-                            type: integer
-                          baseUrl:
-                            type: string
+                      type: object
+                      properties:
+                        apiType:
+                          type: string
+                        apiVersion:
+                          type: integer
+                        baseUrl:
+                          type: string
+                    example:
+                      - apiType: bsvapi.account
+                        apiVersion: 1
+                        baseUrl: /api/v1/account
+
+                      - apiType: bsvapi.channel,
+                        apiVersion: 1
+                        baseUrl: /api/v1/channel
+
+                      - apiType: bsvapi.websocket,
+                        apiVersion: 1
+                        baseUrl: /api/v1/web-socket
+
 
   /api/v1/account:
     get:
@@ -284,6 +295,50 @@ paths:
           description: Unauthorized
         '406':
           description: Not Acceptable
+
+  # General Websocket
+  /api/v1/web-socket:
+    parameters:
+      - name: token
+        in: query
+        required: true
+        description: The master bearer token
+        schema:
+          type: string
+          default: t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==
+    get:
+      summary: General-purpose websocket
+      description: |
+        Subscribe to all websocket notifications for an account
+        i.e. includes all peer channels associated with the overarching account.
+
+        Authentication is via the query parameter ?token="master bearer token" and must
+        be the master bearer token for the account.
+
+        Authentication is not performed via http headers as this would not be compatible
+        with javascript and browser clients.
+
+        At present these notification types are supported:
+
+        Chain tip notifications
+        - message_type: bsv.api.headers.tip
+        - result: Chain tip (see /api/v1/headers/tips endpoint for json structure)
+
+        Peer Channels notifications
+        - message_type: bsv.api.channels.notification
+        - result: Peer channel notification (example below)
+
+      security: []
+      tags:
+        - General Websocket
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneralNotification"
+
 
   # Peer Channels APIs
 
@@ -824,6 +879,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Channel"
+    GeneralNotification:
+      type: object
+      properties:
+        message_type:
+          type: string
+        result:
+          type: object
+      example:
+        message_type: "bsv.api.channels.notification"
+        result:
+          id: HwFd6t4R3qzCMvVqUz6beTf_RJScKOBtFBZaiciZYoPVAaWrJ95_Umr61OdVkYaSj8kjH5PNMy2PMDinGf8-MA==
+          notification: New message arrived
+
     TipBinary:
       type: string
       format: binary
