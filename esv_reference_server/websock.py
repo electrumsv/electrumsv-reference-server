@@ -6,13 +6,10 @@ from typing import Union
 import typing
 from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse
-
-from esv_reference_server import errors
 from esv_reference_server.errors import Error
-from esv_reference_server.msg_box.controller import _auth_ok
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from esv_reference_server.types import GeneralWSClient
-from esv_reference_server.utils import _try_read_bearer_token_from_query
+from esv_reference_server.utils import _try_read_bearer_token_from_query, _auth_ok
 
 if typing.TYPE_CHECKING:
     from esv_reference_server.server import ApplicationState
@@ -38,6 +35,8 @@ class GeneralWebSocket(web.View):
         ws = None
         ws_id = str(uuid.uuid4())
 
+        account_id = 0
+
         try:
             # Note this bearer token is the channel-specific one
             master_api_token = _try_read_bearer_token_from_query(self.request)
@@ -45,7 +44,9 @@ class GeneralWebSocket(web.View):
                 raise Error(reason="Missing 'token' query parameter (requires master bearer token)",
                             status=400)
             if not _auth_ok(master_api_token, db):
-                raise Error(reason="Unauthorized - Invalid Token (example: ?token=t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==)",
+                raise Error(reason="Unauthorized - Invalid Token "
+                                   "(example: ?token=t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0"
+                                   "_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==)",
                             status=401)
 
             ws = web.WebSocketResponse()
@@ -53,6 +54,7 @@ class GeneralWebSocket(web.View):
             client = GeneralWSClient(
                 ws_id=ws_id,
                 websocket=ws,
+                account_id=account_id,
                 accept_type=accept_type
             )
             app_state.add_ws_client(client)

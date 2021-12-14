@@ -24,13 +24,13 @@ from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
 from esv_reference_server.msg_box.view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate, MessageViewModelGetJSON, \
     MessageViewModelGetBinary
-from esv_reference_server.types import MsgBoxWSClient, EndpointInfo, GeneralNotification, \
+from esv_reference_server.types import MsgBoxWSClient, EndpointInfo, \
     PushNotification
 from esv_reference_server.utils import _try_read_bearer_token, _auth_ok, \
     _try_read_bearer_token_from_query
 
 if TYPE_CHECKING:
-    from esv_reference_server.server import ApplicationState, AiohttpApplication
+    from esv_reference_server.server import ApplicationState
     from esv_reference_server.sqlite_db import SQLiteDatabase
 
 
@@ -417,16 +417,14 @@ async def write_message(request: web.Request) -> web.Response:
     notification_new_message_text = os.getenv('NOTIFICATION_TEXT_NEW_MESSAGE',
                                               'New message arrived')
     notification = PushNotification(
-        channel_id=msg_box.id,
+        msg_box=msg_box,
         notification=notification_new_message_text,
-        external_id=msg_box.external_id
     )
     # Per-Channel reference API
     app_state.msg_box_new_msg_queue.put_nowait((msg_box_api_token_object.id, notification))
 
     # General-Purpose websocket
-    app_state.general_ws_queue.put_nowait((account_id, GeneralNotification(
-        message_type="bsvapi.channels.notification", result=notification)))
+    app_state.general_ws_queue.put_nowait((account_id, notification))
 
     return web.json_response(msg_box_get_view.to_dict())
 

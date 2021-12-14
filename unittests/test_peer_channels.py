@@ -585,9 +585,10 @@ class TestAiohttpRESTAPI:
 
             completion_event = asyncio.Event()
             url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
-            asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
+            task1 = asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
             await asyncio.sleep(3)
-            asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
+            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
+            await asyncio.gather(task1, task2)
             await completion_event.wait()
 
         asyncio.run(main())
@@ -641,11 +642,12 @@ class TestAiohttpRESTAPI:
 
             completion_event = asyncio.Event()
             url = WS_URL_GENERAL
-            asyncio.create_task(wait_on_sub(url, TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
+            task1 = asyncio.create_task(wait_on_sub(url, TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
                 completion_event))
             await asyncio.sleep(3)
-            asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
+            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
                 EXPECTED_MSG_COUNT))
+            await asyncio.gather(task1, task2)
             await completion_event.wait()
 
         asyncio.run(main())

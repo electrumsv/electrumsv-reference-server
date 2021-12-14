@@ -1,3 +1,4 @@
+import base64
 import logging
 
 import aiohttp
@@ -173,6 +174,7 @@ async def _subscribe_to_general_notifications_headers(api_token: str, expected_c
 
 async def _subscribe_to_general_notifications_peer_channels(url: str, api_token: str,
         expected_count: int, completion_event: asyncio.Event) -> None:
+    """Todo - Tests to assert that a different account_id does NOT receive messages it should not"""
     logger = logging.getLogger("test-general-notifications")
 
     count = 0
@@ -188,6 +190,11 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
                         content = json.loads(msg.data)
                         logger.info(f'New message: {content}')
                         assert content['message_type'] == 'bsvapi.channels.notification'
+                        assert isinstance(content['result'], Dict)
+                        assert isinstance(content['result']['id'], str)
+                        channel_id_bytes = base64.urlsafe_b64decode(content['result']['id'])
+                        assert len(channel_id_bytes) == 64
+                        assert content['result']['notification'] == 'New message arrived'
 
                         count += 1
                         if expected_count == count:

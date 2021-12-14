@@ -1,12 +1,16 @@
-from datetime import datetime
 from typing import NamedTuple, TypedDict, Union
 
+import typing
 from aiohttp import web
+
+if typing.TYPE_CHECKING:
+    from esv_reference_server.msg_box.models import MsgBox
 
 
 class GeneralWSClient(NamedTuple):
     ws_id: str
     websocket: web.WebSocketResponse
+    account_id: int
     accept_type: str  # application/json or application/octet-stream
 
 
@@ -50,9 +54,8 @@ class Header(TypedDict):
 
 
 class PushNotification(TypedDict):
-    channel_id: int
+    msg_box: 'MsgBox'
     notification: str
-    external_id: str  # general websocket needs this
 
 
 class TipNotification(TypedDict):
@@ -62,9 +65,14 @@ class TipNotification(TypedDict):
     height: int
 
 
+class ChannelNotification(TypedDict):
+    id: str
+    notification: str
+
+
 class GeneralNotification(TypedDict):
     message_type: str
     result: Union[
-        PushNotification,
-        TipNotification
+        TipNotification,
+        ChannelNotification
     ]

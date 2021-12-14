@@ -3,14 +3,10 @@ import uuid
 
 import aiohttp
 import typing
-from aiohttp import web, WSServerHandshakeError, WebSocketError
-from aiohttp.client_exceptions import RequestInfo
+from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse
-from multidict import CIMultiDictProxy
 
 from esv_reference_server.errors import Error
-from esv_reference_server.msg_box.controller import _try_read_bearer_token, _auth_ok
-from esv_reference_server.sqlite_db import SQLiteDatabase
 from esv_reference_server.types import HeadersWSClient
 
 if typing.TYPE_CHECKING:
