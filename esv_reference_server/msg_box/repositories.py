@@ -554,7 +554,7 @@ class MsgBoxSQLiteRepository:
         seq = 0
         if len(rows) != 0:
             seq = rows[0][0]
-        return seq
+        return seq if seq is not None else 0
 
     def get_messages(self, api_token_id: int, onlyunread: bool) \
             -> Optional[Tuple[List[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
