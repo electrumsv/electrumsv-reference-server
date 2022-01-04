@@ -28,9 +28,10 @@ async def get_header(request: web.Request) -> web.Response:
     try:
         url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{blockhash}"
         if accept_type == 'application/octet-stream':
-            request_headers = {'Content-Type': 'application/octet-stream'}  # Should be 'Accept'
+            request_headers = {'Accept': 'application/octet-stream'}
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.read()
+
             response_headers = {'Content-Type': 'application/octet-stream',
                                 'User-Agent': 'ESV-Ref-Server'}
             return web.Response(body=result, status=200, reason='OK', headers=response_headers)
