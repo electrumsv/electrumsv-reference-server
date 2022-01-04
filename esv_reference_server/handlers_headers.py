@@ -3,11 +3,12 @@ import uuid
 
 import aiohttp
 import typing
+from typing import List
 from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse
 
 from esv_reference_server.errors import Error
-from esv_reference_server.types import HeadersWSClient
+from esv_reference_server.types import HeadersWSClient, HeaderSVTip
 
 if typing.TYPE_CHECKING:
     from esv_reference_server.server import ApplicationState
@@ -89,7 +90,7 @@ async def get_chain_tips(request: web.Request) -> web.Response:
         url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/tips"
         request_headers = {'Accept': 'application/json'}
         async with client_session.get(url_to_fetch, headers=request_headers) as response:
-            result = await response.json()
+            result: List[HeaderSVTip] = await response.json()
         response_headers = {'User-Agent': 'ESV-Ref-Server'}
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
     except aiohttp.ClientConnectorError as e:

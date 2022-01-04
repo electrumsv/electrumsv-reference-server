@@ -719,7 +719,7 @@ paths:
         - HeaderSV APIs
       responses:
         '200':
-          description: Get a batch of raw block headers
+          description: Get a batch of raw block headers i.e. an array of 80 byte headers
           content:
             application/octet-stream:
               schema:
@@ -778,10 +778,11 @@ paths:
         '200':
           description: |
             Subscribe to websocket notifications of the new chain tip.
+            See below for binary struct format
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Tip"
+                $ref: "#/components/schemas/TipBinary"
 
 components:
   securitySchemes:
@@ -863,7 +864,7 @@ components:
       type: object
       properties:
         id:
-          type: string
+          type: integer
         token:
           type: string
         description:
@@ -891,7 +892,6 @@ components:
         result:
           id: HwFd6t4R3qzCMvVqUz6beTf_RJScKOBtFBZaiciZYoPVAaWrJ95_Umr61OdVkYaSj8kjH5PNMy2PMDinGf8-MA==
           notification: New message arrived
-
     TipBinary:
       type: string
       format: binary

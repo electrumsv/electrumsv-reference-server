@@ -11,8 +11,8 @@ from _pytest.outcomes import Skipped
 from aiohttp import WSServerHandshakeError
 
 from unittests.conftest import API_ROUTE_DEFS, _successful_call, TEST_MASTER_BEARER_TOKEN, \
-    _subscribe_to_general_notifications_headers, _assert_tip_structure_correct, \
-    _assert_header_structure, REGTEST_GENESIS_BLOCK_HASH, WS_URL_HEADERS
+    _assert_tip_structure_correct, _assert_header_structure, REGTEST_GENESIS_BLOCK_HASH, \
+    WS_URL_HEADERS, _assert_tip_notification_structure
 
 
 class TestAiohttpRESTAPI:
@@ -110,10 +110,10 @@ class TestAiohttpRESTAPI:
                     self.logger.info(f'Connected to {WS_URL_HEADERS}')
 
                     async for msg in ws:
-                        content = json.loads(msg.data)
+                        content = msg.data
                         self.logger.info(f'New header notification: {content}')
 
-                        result = _assert_header_structure(content)
+                        result = _assert_tip_notification_structure(content)
                         if not result:
                             return False
 
@@ -174,24 +174,6 @@ class TestAiohttpRESTAPI:
             fut1.result()  # skip or pass
 
         asyncio.run(main())
-
-    def test_general_purpose_websocket_tip_notifications(self):
-        # Skip if HeaderSV APIs unavailable
-        route = API_ROUTE_DEFS['get_chain_tips']
-        self.logger.debug(f"test_get_chain_tips url: {route.url}")
-        result: requests.Response = _successful_call(route.url,
-            route.http_method, None)
-        if result.status_code == 503:
-            pytest.skip(result.reason)
-
-        async def wait_on_sub(api_token: str, expected_count: int, completion_event: asyncio.Event):
-            try:
-                await _subscribe_to_general_notifications_headers(api_token, expected_count,
-                                                          completion_event)
-            except WSServerHandshakeError as e:
-                if e.status == 401:
-                    self.logger.debug(f"Unauthorized - Bad Bearer Token")
-                    assert False  # i.e. auth should have passed
 
         # Test tip notifications
         async def mine_blocks(expected_msg_count: int):

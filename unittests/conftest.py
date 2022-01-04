@@ -1,5 +1,6 @@
 import base64
 import logging
+import struct
 
 import aiohttp
 import asyncio
@@ -8,9 +9,8 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Optional, Union, Dict
+from typing import Optional, Dict
 
-from _pytest.outcomes import Skipped
 from aiohttp.abc import Application
 from bitcoinx import PublicKey, PrivateKey
 import requests
@@ -110,6 +110,13 @@ def _successful_call(url: str, method: str, headers: Optional[dict] = None,
     return request_call(url, data=json.dumps(request_body), headers=headers)
 
 
+def _assert_tip_notification_structure(tip_notification: bytes):
+    assert len(tip_notification) == 84
+    height = struct.unpack('<I', tip_notification[80:84])[0]
+    assert isinstance(height, int)
+    return True
+
+
 def _assert_header_structure(header: Dict) -> bool:
     assert isinstance(header['hash'], str)
     assert len(header['hash']) == 64
@@ -137,39 +144,6 @@ def _assert_tip_structure_correct(tip: Dict) -> bool:
     assert isinstance(tip['height'], int)
     assert isinstance(tip['confirmations'], int)
     return True
-
-async def _subscribe_to_general_notifications_headers(api_token: str, expected_count: int,
-    completion_event: asyncio.Event) -> Union[bool, Skipped]:
-    logger = logging.getLogger("test-general-websocket-headers")
-
-    count = 0
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(WS_URL_GENERAL + f"?token={api_token}",
-                    timeout=5.0) as ws:
-                logger.info(f'Connected to {WS_URL_GENERAL}')
-
-                async for msg in ws:
-                    content = json.loads(msg.data)
-                    logger.info(f'New header notification: {content}')
-
-                    assert content['message_type'] == 'bsvapi.headers.tip'
-                    result = _assert_header_structure(content['result'])
-                    if not result:
-                        return False
-
-                    count += 1
-                    if count == expected_count:
-                        logger.info(f"Received {expected_count} headers successfully")
-                        completion_event.set()
-                        return result
-                    if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                        break
-    except WSServerHandshakeError as e:
-        if e.status == 401:
-            raise WebsocketUnauthorizedException()
-    except Exception as e:
-        logger.exception("unexpected exception in _subscribe_to_general_notifications_headers")
 
 
 async def _subscribe_to_general_notifications_peer_channels(url: str, api_token: str,

@@ -8,4 +8,5 @@ SET SdkDir=%ScriptDir%\..
 echo %ScriptDir%
 cd %ScriptDir%
 mypy --install-types --non-interactive
-mypy --config=%SdkDir%\mypy.ini %SdkDir%\esv_reference_server
+mypy --config=%SdkDir%\mypy.ini %SdkDir%\esv_reference_server  --python-version 3.10
+

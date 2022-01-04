@@ -1,4 +1,4 @@
-from typing import NamedTuple, TypedDict, Union
+from typing import NamedTuple, TypedDict
 
 import typing
 from aiohttp import web
@@ -58,7 +58,7 @@ class PushNotification(TypedDict):
     notification: str
 
 
-class TipNotification(TypedDict):
+class HeaderSVTip(TypedDict):
     header: Header
     state: str
     chainWork: int
@@ -72,7 +72,4 @@ class ChannelNotification(TypedDict):
 
 class GeneralNotification(TypedDict):
     message_type: str
-    result: Union[
-        TipNotification,
-        ChannelNotification
-    ]
+    result: ChannelNotification
