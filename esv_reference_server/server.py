@@ -4,6 +4,7 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 
 import json
+import struct
 from pathlib import Path
 
 import aiohttp
@@ -119,10 +120,7 @@ class ApplicationState(object):
                 try:
                     url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
-                    request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
-                                    "id": 1}
-                    async with session.post(url_to_fetch, headers=request_headers,
-                            json=request_body) as resp:
+                    async with session.post(url_to_fetch, headers=request_headers) as resp:
                         assert resp.status == 200, resp.reason
                         result = await resp.json()
 
@@ -145,29 +143,30 @@ class ApplicationState(object):
                     # logger.error(f"HeaderSV service is unavailable on {self.header_sv_url}")
                     # Any new websocket connections will be notified when HeaderSV is back online
                     current_best_hash = ""
+                    await asyncio.sleep(1)
                     continue
                 except Exception as e:
                     logger.exception(e)
+                    await asyncio.sleep(1)
                     continue
 
                 if not len(self.get_headers_ws_clients()) and not len(self.get_ws_clients()):
                     continue
 
                 url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
-                request_headers = {'Accept': 'application/json'}
-                request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
-                                "id": 1}
-                async with await session.post(url_to_fetch, headers=request_headers,
-                                              json=request_body) as resp:
+                request_headers = {'Accept': 'application/octet-stream'}
+                async with await session.post(url_to_fetch, headers=request_headers) as resp:
                     assert resp.status == 200, resp.reason
-                    result = await resp.json()
+                    raw_header = await resp.read()
+
+                tip_notification = raw_header + struct.pack('<I', current_best_height)
 
                 # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client in self.get_headers_ws_clients().items():
                     try:
                         self.logger.debug(f"Sending msg to header websocket client "
                                           f"ws_id: {ws_client.ws_id}")
-                        await ws_client.websocket.send_json(result)
+                        await ws_client.websocket.send_bytes(tip_notification)
                     except ConnectionResetError:
                         self.logger.error(f"Websocket disconnected")
 

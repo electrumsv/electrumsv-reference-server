@@ -10,13 +10,12 @@ import json
 import logging
 import os
 import sys
-import threading
 from pathlib import Path
 import requests
 
-from esv_reference_server.errors import Error, WebsocketUnauthorizedException
+from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.sqlite_db import SQLiteDatabase
-from server import logger, AiohttpServer, get_app
+from server import logger, AiohttpServer
 from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
     API_ROUTE_DEFS, app, WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels
 
@@ -68,7 +67,7 @@ class TestAiohttpRESTAPI:
 
     @classmethod
     def setup_class(self) -> None:
-        self.logger = logging.getLogger("TestAiohttpRESTAPI")
+        self.logger = logging.getLogger("test-aiohttp-rest-api")
         logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
             level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
 

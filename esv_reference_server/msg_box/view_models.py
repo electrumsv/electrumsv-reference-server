@@ -119,7 +119,7 @@ class APITokenViewModelCreate:
 
 
 class APITokenViewModelGetJSON(TypedDict):
-    id: str
+    id: int
     token: str
     description: str
     can_read: bool
@@ -128,7 +128,7 @@ class APITokenViewModelGetJSON(TypedDict):
 
 @dataclass()
 class APITokenViewModelGet:
-    id: str
+    id: int
     token: str
     description: str
     can_read: bool
