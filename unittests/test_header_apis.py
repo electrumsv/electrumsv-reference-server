@@ -12,7 +12,7 @@ from aiohttp import WSServerHandshakeError
 
 from unittests.conftest import API_ROUTE_DEFS, _successful_call, TEST_MASTER_BEARER_TOKEN, \
     _assert_tip_structure_correct, _assert_header_structure, REGTEST_GENESIS_BLOCK_HASH, \
-    WS_URL_HEADERS, _assert_tip_notification_structure
+    WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct
 
 
 class TestAiohttpRESTAPI:
@@ -77,10 +77,27 @@ class TestAiohttpRESTAPI:
 
         assert expected == result.json()
 
-    def test_get_chain_tips(self):
+    def test_get_header_binary(self):
+        expected = \
+            b'\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' \
+            b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' \
+            b';\xa3\xed\xfdz{\x12\xb2z\xc7,>gv\x8fa\x7f\xc8\x1b\xc3\x88\x8aQ2:\x9f\xb8' \
+            b'\xaaK\x1e^J\xda\xe5IM\xff\xff\x7f \x02\x00\x00\x00'
+
+        route = API_ROUTE_DEFS['get_header']
+        self.logger.debug(f"test_get_header url: {route.url}")
+        request_headers = {'Accept': 'application/octet-stream'}
+        result: requests.Response = _successful_call(route.url.format(
+            hash=REGTEST_GENESIS_BLOCK_HASH),
+            route.http_method, request_headers, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        if result.status_code == 503:
+            pytest.skip(result.reason)
+        assert expected == result.content
+
+    def test_get_chain_tips_json(self):
         route = API_ROUTE_DEFS['get_chain_tips']
         self.logger.debug(f"test_get_chain_tips url: {route.url}")
-        result: requests.Response = _successful_call(route.url,
+        result: requests.Response = _successful_call(route.url + "?longest_chain=1",
             route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
         if result.status_code == 503:
             pytest.skip(result.reason)
@@ -88,6 +105,19 @@ class TestAiohttpRESTAPI:
         response_json = result.json()
         assert isinstance(response_json, list)
         _assert_tip_structure_correct(response_json[0])
+
+    def test_get_chain_tips_binary(self):
+        route = API_ROUTE_DEFS['get_chain_tips']
+        self.logger.debug(f"test_get_chain_tips url: {route.url}")
+        request_headers = {'Accept': 'application/octet-stream'}
+        result: requests.Response = _successful_call(route.url + "?longest_chain=1",
+            route.http_method, request_headers, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        if result.status_code == 503:
+            pytest.skip(result.reason)
+
+        response = result.content
+        assert isinstance(response, bytes)
+        _assert_binary_tip_structure_correct(response)
 
     def test_get_peers(self):
         route = API_ROUTE_DEFS['get_peers']

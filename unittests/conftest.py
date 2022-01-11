@@ -146,6 +146,12 @@ def _assert_tip_structure_correct(tip: Dict) -> bool:
     return True
 
 
+def _assert_binary_tip_structure_correct(tip: bytes) -> bool:
+    assert isinstance(tip, bytes)
+    assert len(tip) == 84
+    return True
+
+
 async def _subscribe_to_general_notifications_peer_channels(url: str, api_token: str,
         expected_count: int, completion_event: asyncio.Event) -> None:
     """Todo - Tests to assert that a different account_id does NOT receive messages it should not"""
