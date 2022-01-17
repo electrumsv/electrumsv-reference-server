@@ -31,7 +31,12 @@ from . import handlers, handlers_headers
 from esv_reference_server import msg_box
 from .sqlite_db import SQLiteDatabase
 
-from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile, ValidatorError
+try:
+    from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile, ValidatorError
+except ModuleNotFoundError:
+    found_swagger = False
+else:
+    found_swagger = True
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
@@ -322,31 +327,32 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
     await app['client_session'].close()
 
 
-# Custom media handlers
-async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
-    try:
-        return await request.json(), False
-    except ValueError as e:
-        raise ValidatorError(str(e))
+if found_swagger:
+    # Custom media handlers
+    async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
+        try:
+            return await request.json(), False
+        except ValueError as e:
+            raise ValidatorError(str(e))
 
 
-async def application_octet_stream(request: web.Request) -> Tuple[bytes, bool]:
-    try:
-        return await request.read(), True
-    except ValueError as e:
-        raise ValidatorError(str(e))
+    async def application_octet_stream(request: web.Request) -> Tuple[bytes, bool]:
+        try:
+            return await request.read(), True
+        except ValueError as e:
+            raise ValidatorError(str(e))
 
 
-async def multipart_mixed(request: web.Request) \
-        -> Tuple[List[Optional[bytes]], bool]:
-    try:
-        reader = aiohttp.MultipartReader(request.headers, content=request.content)
-        values = []
-        async for part in reader:
-            values.append(await part.next())
-        return values, True
-    except ValueError as e:
-        raise ValidatorError(str(e))
+    async def multipart_mixed(request: web.Request) \
+            -> Tuple[List[Optional[bytes]], bool]:
+        try:
+            reader = aiohttp.MultipartReader(request.headers, content=request.content)
+            values = []
+            async for part in reader:
+                values.append(await part.next())
+            return values, True
+        except ValueError as e:
+            raise ValidatorError(str(e))
 
 
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
@@ -381,11 +387,12 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
     app['general_ws_clients'] = app_state.general_ws_clients
 
-    swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
-        swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
-    swagger.register_media_type_handler("application/json", application_json)
-    swagger.register_media_type_handler("application/octet-stream", application_octet_stream)
-    swagger.register_media_type_handler("multipart/mixed", multipart_mixed)
+    if found_swagger:
+        swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
+            swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
+        swagger.register_media_type_handler("application/json", application_json)
+        swagger.register_media_type_handler("application/octet-stream", application_octet_stream)
+        swagger.register_media_type_handler("multipart/mixed", multipart_mixed)
 
     # Non-optional APIs
     # cache app.routes to assist with keeping unit tests up-to-date
@@ -466,8 +473,13 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
         pass  # TBD
 
-    for route_def, auth_required in app.routes:
-        swagger.add_routes([route_def])
+    if found_swagger:
+        for route_def, auth_required in app.routes:
+            swagger.add_routes([route_def])
+    else:
+        app.add_routes([ v[0] for v in app.routes ])
+
+    app.found_swagger = found_swagger
 
     BASE_URL = f"http://{host}:{port}"
     app.host = host

@@ -66,7 +66,9 @@ class AiohttpServer:
     async def start(self) -> None:
         self.app.is_alive = True
         self.logger.debug("Started on http://%s:%s", self.host, self.port)
-        self.logger.debug("Swagger docs hosted at: http://%s:%s/api/v1/docs", self.host, self.port)
+        if self.app.found_swagger:
+            self.logger.debug("Swagger docs hosted at: http://%s:%s/api/v1/docs", self.host,
+                self.port)
         self.runner = web.AppRunner(self.app, access_log=None)
         await self.runner.setup()
         site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
