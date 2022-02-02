@@ -203,15 +203,6 @@ def _is_server_running(url):
 
 
 # Global, shared singleton
-os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
-os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
-os.environ['SKIP_DOTENV_FILE'] = '1'
-os.environ['REFERENCE_SERVER_RESET'] = '1'
-os.environ['DATASTORE_LOCATION'] = str(MODULE_DIR.joinpath("test_sqlite.sqlite"))
-os.environ['NOTIFICATION_TEXT_NEW_MESSAGE'] = 'New message arrived'
-os.environ['MAX_MESSAGE_CONTENT_LENGTH'] = '65536'
-os.environ['CHUNKED_BUFFER_SIZE'] = '1024'
-
 app, host, port = get_app(TEST_HOST, TEST_PORT)
 API_ROUTE_DEFS = app.API_ROUTE_DEFS
 # for route in self.API_ROUTE_DEFS.items():
