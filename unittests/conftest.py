@@ -45,7 +45,6 @@ CHANNEL_READ_ONLY_TOKEN: str = ""
 CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 
 
-
 async def main(app: Application, host: str, port: int):
     server = AiohttpServer(app, host, port)
     try:
@@ -192,6 +191,18 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
                 raise WebsocketUnauthorizedException()
 
 
+def _is_server_running(url):
+    try:
+        result = requests.get(url)
+        if result.status_code == 200:
+            return True
+        else:
+            return False
+    except requests.ConnectionError:
+        return False
+
+
+# Global, shared singleton
 os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
 os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
 os.environ['SKIP_DOTENV_FILE'] = '1'
@@ -205,7 +216,3 @@ app, host, port = get_app(TEST_HOST, TEST_PORT)
 API_ROUTE_DEFS = app.API_ROUTE_DEFS
 # for route in self.API_ROUTE_DEFS.items():
 #     print(route)
-
-thread = threading.Thread(target=electrumsv_reference_server_thread, args=(app, host, port),
-            daemon=True)
-thread.start()

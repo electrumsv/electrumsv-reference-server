@@ -1,4 +1,6 @@
 import asyncio
+import threading
+import time
 
 import aiohttp
 from aiohttp import web, WSServerHandshakeError
@@ -17,7 +19,8 @@ from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from server import logger, AiohttpServer
 from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
-    API_ROUTE_DEFS, app, WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels
+    API_ROUTE_DEFS, app, WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels, host, \
+    port, _is_server_running
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 52462
@@ -65,11 +68,21 @@ def electrumsv_reference_server_thread(app: Application, host: str = TEST_HOST,
 
 class TestAiohttpRESTAPI:
 
+    logger = logging.getLogger("test-aiohttp-rest-api")
+
     @classmethod
     def setup_class(self) -> None:
         self.logger = logging.getLogger("test-aiohttp-rest-api")
         logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
             level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
+
+        route = API_ROUTE_DEFS['ping']
+        if not _is_server_running(route.url):
+            thread = threading.Thread(target=electrumsv_reference_server_thread,
+                                      args=(app, host, port),
+                                      daemon=True)
+            thread.start()
+            time.sleep(3)
 
     def setup_method(self) -> None:
         pass

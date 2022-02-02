@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import threading
+import time
 from typing import Union
 
 import aiohttp
@@ -11,8 +13,9 @@ from _pytest.outcomes import Skipped
 from aiohttp import WSServerHandshakeError
 
 from unittests.conftest import API_ROUTE_DEFS, _successful_call, TEST_MASTER_BEARER_TOKEN, \
-    _assert_tip_structure_correct, _assert_header_structure, REGTEST_GENESIS_BLOCK_HASH, \
-    WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct
+    _assert_tip_structure_correct, REGTEST_GENESIS_BLOCK_HASH, \
+    WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct, \
+    _is_server_running, electrumsv_reference_server_thread, app, host, port
 
 
 class TestAiohttpRESTAPI:
@@ -22,6 +25,14 @@ class TestAiohttpRESTAPI:
         self.logger = logging.getLogger("TestAiohttpRESTAPI")
         logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
             level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
+
+        route = API_ROUTE_DEFS['ping']
+        if not _is_server_running(route.url):
+            thread = threading.Thread(target=electrumsv_reference_server_thread,
+                                      args=(app, host, port),
+                                      daemon=True)
+            thread.start()
+            time.sleep(3)
 
     def setup_method(self) -> None:
         pass
