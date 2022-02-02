@@ -5,10 +5,11 @@ import asyncio
 import logging
 import typing
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from typing import Optional, Tuple
 
 from aiohttp import web
 from aiohttp.abc import Application
+from aiohttp.web_app import Application
 
 from esv_reference_server.server import get_aiohttp_app
 from esv_reference_server.constants import Network, SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
@@ -96,7 +97,7 @@ def load_dotenv(dotenv_path):
             os.environ[key] = val
 
 
-def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) -> Application:
+def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) -> tuple[Application, str, int]:
     setup_logging()
     dotenv_path = MODULE_DIR.joinpath('.env')
 
