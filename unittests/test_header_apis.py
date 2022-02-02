@@ -44,7 +44,6 @@ class TestAiohttpRESTAPI:
     def teardown_class(self) -> None:
         pass
 
-    pytest.mark.skipif(os.environ['EXPOSE_HEADER_SV_APIS'] == '0')
     def test_get_headers_by_height(self):
         expected = [
             {'hash': '0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206',
