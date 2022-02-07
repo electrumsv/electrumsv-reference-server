@@ -3,6 +3,7 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 
+from collections import defaultdict
 import json
 import struct
 from pathlib import Path
@@ -14,22 +15,22 @@ import asyncio
 import os
 import logging
 import threading
-from typing import AsyncIterator, Dict, Tuple, Optional, Any, List, Set
+from typing import Any, AsyncIterator, Optional
 
 from aiohttp.web_app import Application
 
-from esv_reference_server.handlers_headers import HeadersWebSocket
-from esv_reference_server.msg_box.controller import MsgBoxWebSocket
-from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
-from esv_reference_server.types import HeadersWSClient, MsgBoxWSClient, Route, EndpointInfo, \
-    GeneralWSClient, GeneralNotification, PushNotification, ChannelNotification
-from esv_reference_server.websock import GeneralWebSocket
-from .constants import Network, SERVER_HOST, SERVER_PORT
-
+from .constants import ACCOUNT_MESSAGE_NAMES, Network, SERVER_HOST, SERVER_PORT
+from . import handlers, handlers_headers, handlers_indexer
+from .indexer_support import maintain_indexer_connection, unregister_unwanted_spent_outputs
 from .keys import create_regtest_server_keys, ServerKeys
-from . import handlers, handlers_headers
-from esv_reference_server import msg_box
+from . import msg_box
+from .msg_box.controller import MsgBoxWebSocket
+from .msg_box.repositories import MsgBoxSQLiteRepository
 from .sqlite_db import SQLiteDatabase
+from .types import AccountMessage, AccountWebsocketState, EndpointInfo, GeneralNotification, \
+    HeadersWSClient, MsgBoxWSClient, Outpoint, PushNotification, Route
+from .utils import pack_account_message_bytes
+from .websock import GeneralWebSocket
 
 try:
     from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile, ValidatorError
@@ -54,8 +55,8 @@ class AiohttpApplication(web.Application):
     def __init__(self) -> None:
         super().__init__()
         self.is_alive: bool = False
-        self.routes: List[Route] = []
-        self.API_ROUTE_DEFS: Dict[str, EndpointInfo] = {}
+        self.routes: list[Route] = []
+        self.API_ROUTE_DEFS: dict[str, EndpointInfo] = {}
 
 
 class ApplicationState(object):
@@ -67,18 +68,18 @@ class ApplicationState(object):
         self.app = app
         self.loop = loop
 
-        self.general_ws_clients: Dict[str, GeneralWSClient] = {}
-        self.general_ws_clients_account_map: Dict[int, str] = {}  # account_id: ws_id
-        self.general_ws_clients_lock: threading.RLock = threading.RLock()
-        self.general_ws_queue: asyncio.Queue[Tuple[int, PushNotification]] = asyncio.Queue()
+        self._account_websocket_state: dict[str, AccountWebsocketState] = {}
+        self._account_websocket_id_by_account_id: dict[int, str] = {}  # account_id: ws_id
+        self._account_websocket_state_lock: threading.RLock = threading.RLock()
+        self.account_message_queue: asyncio.Queue[AccountMessage] = asyncio.Queue()
 
-        self.headers_ws_clients: Dict[str, HeadersWSClient] = {}
+        self.headers_ws_clients: dict[str, HeadersWSClient] = {}
         self.headers_ws_clients_lock: threading.RLock = threading.RLock()
 
-        self.msg_box_ws_clients: Dict[str, MsgBoxWSClient] = {}
-        self.msg_box_ws_clients_map: Dict[int, Set[str]] = {}  # msg_box_id: ws_ids
+        self.msg_box_ws_clients: dict[str, MsgBoxWSClient] = {}
+        self.msg_box_ws_clients_map: dict[int, set[str]] = {}  # msg_box_id: ws_ids
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: asyncio.Queue[Tuple[int, PushNotification]] = asyncio.Queue()
+        self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
 
         self.network = network
         self.sqlite_db = SQLiteDatabase(datastore_location)
@@ -87,14 +88,30 @@ class ApplicationState(object):
         self.header_sv_url = os.getenv('HEADER_SV_URL')
         self.aiohttp_session: Optional[aiohttp.ClientSession] = None
 
+        # Indexer-related state.
+        self._indexer_task: Optional[asyncio.Task[None]] = None
+        self.indexer_url = os.getenv('INDEXER_URL')
+        self._output_spend_counts: dict[Outpoint, int] = defaultdict(int)
+
+        # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
+        #     access the server as if we were doing so with an account. This should be removed
+        #     when we have proper account usage in ESV.
+        self.temporary_account_id: Optional[int] = None
+
     def start_tasks(self) -> None:
-        asyncio.create_task(self.general_notifications_task())
+        asyncio.create_task(self._account_notifications_task())
         asyncio.create_task(self.message_box_notifications_task())
         if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
             asyncio.create_task(self.header_notifications_task())
+        if os.getenv("EXPOSE_INDEXER_APIS", "0") == "1":
+            self._indexer_task = asyncio.create_task(maintain_indexer_connection(self))
+
+    def stop_tasks(self) -> None:
+        if self._indexer_task is not None:
+            self._indexer_task.cancel()
 
     # Headers Websocket Client Get/Add/Remove & Notify thread
-    def get_headers_ws_clients(self) -> Dict[str, HeadersWSClient]:
+    def get_headers_ws_clients(self) -> dict[str, HeadersWSClient]:
         with self.headers_ws_clients_lock:
             return self.headers_ws_clients
 
@@ -102,9 +119,9 @@ class ApplicationState(object):
         with self.headers_ws_clients_lock:
             self.headers_ws_clients[ws_client.ws_id] = ws_client
 
-    def remove_headers_ws_client(self, ws_client: HeadersWSClient) -> None:
+    def remove_headers_ws_client(self, ws_id: str) -> None:
         with self.headers_ws_clients_lock:
-            del self.headers_ws_clients[ws_client.ws_id]
+            del self.headers_ws_clients[ws_id]
 
     async def _get_aiohttp_session(self) -> aiohttp.ClientSession:
         if not self.aiohttp_session:
@@ -155,7 +172,7 @@ class ApplicationState(object):
                     await asyncio.sleep(1)
                     continue
 
-                if not len(self.get_headers_ws_clients()) and not len(self.get_ws_clients()):
+                if not len(self.get_headers_ws_clients()) and not len(self.get_account_websockets()):
                     continue
 
                 url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
@@ -176,7 +193,7 @@ class ApplicationState(object):
                         self.logger.error(f"Websocket disconnected")
 
                 # Send new tip notification to all connected websocket clients
-                for ws_id, ws_client_general in self.get_ws_clients().items():
+                for ws_id, ws_client_general in self.get_account_websockets().items():
                     try:
                         self.logger.debug(f"Sending msg to general websocket client "
                                           f"ws_id: {ws_client_general.ws_id}")
@@ -190,12 +207,12 @@ class ApplicationState(object):
             self.logger.info("Closing push notifications thread")
 
     # Message Box Websocket Client Get/Add/Remove & Notify thread
-    def get_msg_box_ws_clients(self) -> Dict[str, MsgBoxWSClient]:
+    def get_msg_box_ws_clients(self) -> dict[str, MsgBoxWSClient]:
         with self.msg_box_ws_clients_lock:
             return self.msg_box_ws_clients
 
     def get_msg_box_ws_clients_by_channel_id(self, msg_box_internal_id: int) \
-            -> List[MsgBoxWSClient]:
+            -> list[MsgBoxWSClient]:
         with self.msg_box_ws_clients_lock:
             ws_ids = self.msg_box_ws_clients_map[msg_box_internal_id]
             ws_clients = []
@@ -211,13 +228,13 @@ class ApplicationState(object):
                 self.msg_box_ws_clients_map[ws_client.msg_box_internal_id] = set()
             self.msg_box_ws_clients_map[ws_client.msg_box_internal_id].add(ws_client.ws_id)
 
-    def remove_msg_box_ws_client(self, ws_client: MsgBoxWSClient) -> None:
+    def remove_msg_box_ws_client(self, ws_id: str) -> None:
         with self.msg_box_ws_clients_lock:
-            if self.msg_box_ws_clients.get(ws_client.ws_id):
-                del self.msg_box_ws_clients[ws_client.ws_id]
-                self.msg_box_ws_clients_map[ws_client.msg_box_internal_id].remove(ws_client.ws_id)
-                if len(self.msg_box_ws_clients_map[ws_client.msg_box_internal_id]) == 0:
-                    del self.msg_box_ws_clients_map[ws_client.msg_box_internal_id]
+            msg_box_internal_id = self.msg_box_ws_clients[ws_id].msg_box_internal_id
+            del self.msg_box_ws_clients[ws_id]
+            self.msg_box_ws_clients_map[msg_box_internal_id].remove(ws_id)
+            if len(self.msg_box_ws_clients_map[msg_box_internal_id]) == 0:
+                del self.msg_box_ws_clients_map[msg_box_internal_id]
 
     async def message_box_notifications_task(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
@@ -257,58 +274,91 @@ class ApplicationState(object):
             self.logger.info("Closing push notifications thread")
 
     # General Websocket Client Get/Add/Remove & Notify thread
-    def get_ws_clients(self) -> Dict[str, GeneralWSClient]:
-        with self.general_ws_clients_lock:
-            return self.general_ws_clients
+    def get_account_websockets(self) -> dict[str, AccountWebsocketState]:
+        with self._account_websocket_state_lock:
+            return self._account_websocket_state
 
-    def get_ws_client_for_account_id(self, account_id: int) -> Optional[GeneralWSClient]:
-        """Only a single general websocket is allowed to be open per account_id"""
-        with self.general_ws_clients_lock:
-            ws_id = self.general_ws_clients_account_map.get(account_id)
-            if ws_id:
-                return self.general_ws_clients[ws_id]
+    def get_websocket_state_for_account_id(self, account_id: int) \
+            -> Optional[AccountWebsocketState]:
+        with self._account_websocket_state_lock:
+            websocket_id = self._account_websocket_id_by_account_id.get(account_id)
+            if websocket_id:
+                return self._account_websocket_state[websocket_id]
             return None
 
-    def add_ws_client(self, ws_client: GeneralWSClient) -> None:
-        """Creates a two-way mapping for fast lookups"""
-        with self.general_ws_clients_lock:
-            self.general_ws_clients[ws_client.ws_id] = ws_client
-            self.general_ws_clients_account_map[ws_client.account_id] = ws_client.ws_id
+    def setup_account_websocket(self, websocket_state: AccountWebsocketState) -> None:
+        """
+        Track a newly connected websocket for a given account.
+        """
+        with self._account_websocket_state_lock:
+            self._account_websocket_state[websocket_state.ws_id] = websocket_state
+            self._account_websocket_id_by_account_id[websocket_state.account_id] \
+                = websocket_state.ws_id
 
-    def remove_ws_client(self, ws_client: GeneralWSClient) -> None:
-        with self.general_ws_clients_lock:
-            del self.general_ws_clients[ws_client.ws_id]
-            del self.general_ws_clients_account_map[ws_client.account_id]
+    def teardown_account_websocket(self, websocket_id: str) -> None:
+        """
+        Stop tracking a now disconnected websocket for a given account.
+        """
+        with self._account_websocket_state_lock:
+            account_id = self._account_websocket_state[websocket_id].account_id
+            del self._account_websocket_state[websocket_id]
+            del self._account_websocket_id_by_account_id[account_id]
 
-    async def general_notifications_task(self) -> None:
-        """Emits any notifications from the queue to all connected websockets"""
-        try:
-            while self.app.is_alive:
+            outpoints_to_unregister: set[Outpoint] = set()
+            websocket_state = self.get_websocket_state_for_account_id(account_id)
+            if websocket_state is not None:
+                for outpoint in websocket_state.spent_output_registrations:
+                    if self._output_spend_counts[outpoint] > 1:
+                        self._output_spend_counts[outpoint] -= 1
+                    else:
+                        del self._output_spend_counts[outpoint]
+                        outpoints_to_unregister.add(outpoint)
+
+            if outpoints_to_unregister:
+                # TODO(1.4.0) Indexer. Consider any race conditions where a user establishes a new
+                #     connection and the old indexer registrations are removed after the new ones
+                #     are put in place.
+                asyncio.create_task(
+                    unregister_unwanted_spent_outputs(self, account_id, outpoints_to_unregister))
+
+    async def _account_notifications_task(self) -> None:
+        """
+        Serialise and send outgoing account-related notifications.
+        """
+        while self.app.is_alive:
+            account_id, message_kind, payload = await self.account_message_queue.get()
+            self.logger.debug("Got account notification, account_id=%d", account_id)
+
+            websocket_state = self.get_websocket_state_for_account_id(account_id)
+            if websocket_state is None:
+                self.logger.debug(
+                    "No websocket, dropped message, message_kind=%s, account_id=%d",
+                    message_kind, account_id)
+                continue
+
+            if websocket_state.accept_type == "application/json":
+                message_kind_name = ACCOUNT_MESSAGE_NAMES[message_kind]
+                # TODO(1.4.0) JSON support. We might consider unpacking this for JSON into
+                #     some dictionary structure rather than just giving them the hex.
+                if isinstance(payload, bytes): # spent output notification
+                    payload = payload.hex()
+                json_object = GeneralNotification(message_type=message_kind_name, result=payload)
                 try:
-                    account_id, notification = await self.general_ws_queue.get()
-                    self.logger.debug(f"Got general websocket notification for "
-                                      f"account_id: {account_id}")
-                except Exception as e:
-                    logger.exception(e)
-                    continue
+                    await websocket_state.websocket.send_str(data=json.dumps(json_object))
+                except ConnectionResetError:
+                    self.logger.debug(
+                        "Dropped message for disconnected text websocket, message_kind=%s, "
+                        "account_id=%d", message_kind, account_id)
+            else:
+                message_bytes = pack_account_message_bytes(message_kind, payload)
+                try:
+                    await websocket_state.websocket.send_bytes(data=message_bytes)
+                except ConnectionResetError:
+                    self.logger.debug(
+                        "Dropped message for disconnected binary websocket, message_kind=%s, "
+                        "account_id=%d", message_kind, account_id)
 
-                # Send new message notifications to the relevant (and authenticated)
-                # websocket client (based on msg_box_id)
-                msg_box = notification['msg_box']
-                ws_client = self.get_ws_client_for_account_id(msg_box.account_id)
-                if ws_client:
-                    self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
-                    try:
-                        result = ChannelNotification(id=msg_box.external_id,
-                                                     notification=notification['notification'])
-                        msg = GeneralNotification(message_type="bsvapi.channels.notification",
-                                                  result=result)
-                        await ws_client.websocket.send_str(data=json.dumps(msg))
-                    except ConnectionResetError as e:
-                        self.logger.error(f"Websocket disconnected")
-            self.logger.exception("unexpected exception in message_box_notifications_task")
-        finally:
-            self.logger.info("Closing push notifications thread")
+        self.logger.info("exiting push notifications thread")
 
 
 async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
@@ -329,14 +379,14 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
 
 if found_swagger:
     # Custom media handlers
-    async def application_json(request: web.Request) -> Tuple[Dict[Any, Any], bool]:
+    async def application_json(request: web.Request) -> tuple[dict[Any, Any], bool]:
         try:
             return await request.json(), False
         except ValueError as e:
             raise ValidatorError(str(e))
 
 
-    async def application_octet_stream(request: web.Request) -> Tuple[bytes, bool]:
+    async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
         try:
             return await request.read(), True
         except ValueError as e:
@@ -344,7 +394,7 @@ if found_swagger:
 
 
     async def multipart_mixed(request: web.Request) \
-            -> Tuple[List[Optional[bytes]], bool]:
+            -> tuple[list[Optional[bytes]], bool]:
         try:
             reader = aiohttp.MultipartReader(request.headers, content=request.content)
             values = []
@@ -356,7 +406,7 @@ if found_swagger:
 
 
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> Tuple[Application, str, int]:
+        port: int = SERVER_PORT) -> tuple[Application, str, int]:
     loop = asyncio.get_event_loop()
     app = AiohttpApplication()
     app.cleanup_ctx.append(client_session_ctx)
@@ -375,6 +425,10 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
         account_id, api_key = app_state.sqlite_db.create_account(
             client_pub_key.to_bytes(), forced_api_key=REGTEST_VALID_ACCOUNT_TOKEN)
         logger.debug(f"Got RegTest account_id: {account_id}, api_key: {api_key}")
+        # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
+        #     access the server as if we were doing so with an account. This should be removed
+        #     when we have proper account usage in ESV.
+        app_state.temporary_account_id = account_id
         app_state.server_keys = create_regtest_server_keys()
     else:
         # TODO(temporary-prototype-choice) Have some way of finding the non-regtest keys.
@@ -385,7 +439,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app['app_state'] = app_state
     app['headers_ws_clients'] = app_state.headers_ws_clients
     app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
-    app['general_ws_clients'] = app_state.general_ws_clients
+    app['_account_websocket_state'] = app_state._account_websocket_state
 
     if found_swagger:
         swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
@@ -459,7 +513,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
         app.routes.extend([
             Route(web.view("/api/v1/headers/tips/websocket",
-                           HeadersWebSocket), False),
+                           handlers_headers.HeadersWebSocket), False),
             Route(web.get("/api/v1/headers/tips",
                           handlers_headers.get_chain_tips), False),
             Route(web.get("/api/v1/headers/by-height",
@@ -472,6 +526,20 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
         pass  # TBD
+
+    if os.getenv("EXPOSE_INDEXER_APIS") == "1":
+        app.routes.extend([
+            Route(web.post("/api/v1/restoration/search",
+                handlers_indexer.indexer_post_pushdata_filter_matches), False),
+            Route(web.get("/api/v1/transaction/{txid}",
+                handlers_indexer.indexer_get_transaction), False),
+            Route(web.get("/api/v1/merkle-proof/{txid}",
+                handlers_indexer.indexer_get_merkle_proof), False),
+            Route(web.post("/api/v1/output-spend",
+                handlers_indexer.indexer_post_output_spends), False),
+            Route(web.post("/api/v1/output-spend/notifications",
+                handlers_indexer.indexer_post_output_spend_notifications), False),
+        ])
 
     if found_swagger:
         for route_def, auth_required in app.routes:

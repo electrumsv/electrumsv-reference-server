@@ -12,7 +12,7 @@ from aiohttp.abc import Application
 from aiohttp.web_app import Application
 
 from esv_reference_server.server import get_aiohttp_app
-from esv_reference_server.constants import Network, SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
+from esv_reference_server.constants import SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
 
 if typing.TYPE_CHECKING:
     from .esv_reference_server.server import ApplicationState
@@ -44,7 +44,7 @@ def setup_logging():
 class AiohttpServer:
 
     def __init__(self, app: web.Application, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> None:
+            port: int = SERVER_PORT) -> None:
         self.runner: Optional[web.AppRunner] = None
         self.app = app
         self.app_state: 'ApplicationState' = app['app_state']
@@ -56,17 +56,17 @@ class AiohttpServer:
         self.logger = logging.getLogger("aiohttp-rest-api")
 
     async def on_startup(self, app: web.Application) -> None:
-        self.logger.debug(f"File logging path={FULL_LOG_PATH}")
+        self.logger.debug("File logging path=%s", FULL_LOG_PATH)
 
     async def on_shutdown(self, app: web.Application) -> None:
-        self.logger.debug("Cleaning up...")
+        self.logger.debug("Stopping server...")
         await self.app_state.close_aiohttp_session()
         self.app.is_alive = False
-        self.logger.debug("Stopped.")
+        self.logger.info("Stopped server")
 
     async def start(self) -> None:
         self.app.is_alive = True
-        self.logger.debug("Started on http://%s:%s", self.host, self.port)
+        self.logger.info("Started server on http://%s:%s", self.host, self.port)
         if self.app.found_swagger:
             self.logger.debug("Swagger docs hosted at: http://%s:%s/api/v1/docs", self.host,
                 self.port)
@@ -79,6 +79,7 @@ class AiohttpServer:
             await asyncio.sleep(0.5)
 
     async def stop(self) -> None:
+        self.app_state.stop_tasks()
         assert self.runner is not None
         await self.runner.cleanup()
 
@@ -110,7 +111,7 @@ def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) -> tuple[Applicati
 
     DEFAULT_DATASTORE_LOCATION = MODULE_DIR / 'esv_reference_server.sqlite'
     datastore_location = os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION)
-    logger.debug(f"Datastore location: {datastore_location}")
+    logger.debug("Datastore location %s", datastore_location)
 
     app = get_aiohttp_app(network_enum, datastore_location, host, port)
     return app
@@ -129,8 +130,8 @@ if __name__ == "__main__":
         asyncio.run(main())
         sys.exit(0)
     except KeyboardInterrupt:
-        logger.debug("ElectrumSV Reference Server stopped")
+        pass
     except Exception:
         logger.exception("unexpected exception in __main__")
     finally:
-        logger.info("ElectrumSV Reference Server stopped")
+        logger.info("ElectrumSV reference server exited")

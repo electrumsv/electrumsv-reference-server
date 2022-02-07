@@ -289,7 +289,6 @@ async def process_contract_update_async(refund_signature_bytes: bytes, refund_va
 
     # We disallow the payment change if it is less than a minimum payment increase.
     if refund_value > channel_row.refund_value - MINIMUM_CHANNEL_PAYMENT_VALUE:
-        print(refund_value, channel_row.refund_value - MINIMUM_CHANNEL_PAYMENT_VALUE)
         raise InvalidRefundValueError("Refund delta below minimum payment value")
 
     # TODO(safe-dust) We need to know that we can mine the transaction they are asking us to

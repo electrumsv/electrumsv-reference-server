@@ -164,11 +164,11 @@ class HeadersWebSocket(web.View):
         ws = web.WebSocketResponse()
         await ws.prepare(self.request)
         ws_id = str(uuid.uuid4())
+        client = HeadersWSClient(ws_id=ws_id, websocket=ws)
+        self.request.app['app_state'].add_headers_ws_client(client)
+        self.logger.debug('%s connected. host=%s.', client.ws_id, self.request.host)
 
         try:
-            client = HeadersWSClient(ws_id=ws_id, websocket=ws)
-            self.request.app['app_state'].add_headers_ws_client(client)
-            self.logger.debug('%s connected. host=%s.', client.ws_id, self.request.host)
             await self._handle_new_connection(client)
             return ws
         except Error as e:
@@ -177,13 +177,10 @@ class HeadersWebSocket(web.View):
         finally:
             if not ws.closed:
                 await ws.close()
-                self.logger.debug("removing msg box websocket id: %s", ws_id)
-                if self.request.app['msg_box_ws_clients'].get(ws_id):
-                    del self.request.app['msg_box_ws_clients'][ws_id]
+            self.logger.debug("removing msg box websocket id: %s", ws_id)
+            self.request.app['app_state'].remove_headers_ws_client(ws_id)
 
     async def _handle_new_connection(self, client: HeadersWSClient) -> None:
-        self.ws_clients = self.request.app['headers_ws_clients']
-
         async for msg in client.websocket:
             # Ignore all messages from client
             if msg.type == aiohttp.WSMsgType.text:

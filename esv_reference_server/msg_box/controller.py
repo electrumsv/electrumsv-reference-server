@@ -17,21 +17,21 @@ import aiohttp
 from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse
 
-from esv_reference_server import errors
-from esv_reference_server.errors import Error
-from esv_reference_server.msg_box.models import MsgBox, Message
-from esv_reference_server.msg_box.repositories import MsgBoxSQLiteRepository
-from esv_reference_server.msg_box.view_models import RetentionViewModel, MsgBoxViewModelGet, \
+from ..constants import AccountMessageKind
+from .. import errors
+from ..errors import Error
+from .models import MsgBox, Message
+from .repositories import MsgBoxSQLiteRepository
+from ..types import AccountMessage, ChannelNotification, EndpointInfo, MsgBoxWSClient, \
+    PushNotification
+from ..utils import _try_read_bearer_token, _auth_ok, _try_read_bearer_token_from_query
+from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate, MessageViewModelGetJSON, \
     MessageViewModelGetBinary
-from esv_reference_server.types import MsgBoxWSClient, EndpointInfo, \
-    PushNotification
-from esv_reference_server.utils import _try_read_bearer_token, _auth_ok, \
-    _try_read_bearer_token_from_query
 
 if TYPE_CHECKING:
-    from esv_reference_server.server import ApplicationState
-    from esv_reference_server.sqlite_db import SQLiteDatabase
+    from ..server import ApplicationState
+    from ..sqlite_db import SQLiteDatabase
 
 
 logger = logging.getLogger('handlers-peer-channels')
@@ -366,6 +366,8 @@ async def write_message(request: web.Request) -> web.Response:
 
     MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH', '0'))
 
+    with open(r"c:\data\x.txt", "w+") as f:
+        f.write("%s\n" % request.content_type)
     if request.content_type is None or request.content_type == '':
         raise web.HTTPBadRequest(reason="missing content type header")
 
@@ -424,7 +426,11 @@ async def write_message(request: web.Request) -> web.Response:
     app_state.msg_box_new_msg_queue.put_nowait((msg_box_api_token_object.id, notification))
 
     # General-Purpose websocket
-    app_state.general_ws_queue.put_nowait((account_id, notification))
+    msg_box = notification['msg_box']
+    result = ChannelNotification(id=msg_box.external_id,
+        notification=notification['notification'])
+    app_state.account_message_queue.put_nowait(AccountMessage(account_id,
+        AccountMessageKind.PEER_CHANNEL_MESSAGE, result))
 
     return web.json_response(msg_box_get_view.to_dict())
 
@@ -620,53 +626,52 @@ class MsgBoxWebSocket(web.View):
         Client messages will be ignored"""
         app_state: 'ApplicationState' = self.request.app['app_state']
         msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-        ws = None
         ws_id = str(uuid.uuid4())
 
+        external_id = self.request.match_info.get('channelid')
+        if not external_id:
+            raise Error(reason="channel id wasn't provided", status=404)
+
+        # Note this bearer token is the channel-specific one
+        msg_box_api_token = _try_read_bearer_token_from_query(self.request)
+        if not msg_box_api_token:
+            raise Error(reason=errors.NoBearerToken.reason,
+                        status=errors.NoBearerToken.status)
+
+        account_id = 0
         try:
-            account_id = 0
-            external_id = self.request.match_info.get('channelid')
-            if not external_id:
-                raise Error(reason="channel id wasn't provided", status=404)
+            _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token,
+                                    external_id, msg_box_repository)
+        except web.HTTPException as e:
+            return web.Response(reason="Unauthorized - Invalid Bearer Token", status=401)
 
-            # Note this bearer token is the channel-specific one
-            msg_box_api_token = _try_read_bearer_token_from_query(self.request)
-            if not msg_box_api_token:
-                raise Error(reason=errors.NoBearerToken.reason,
-                            status=errors.NoBearerToken.status)
-            try:
-                _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token,
-                                        external_id, msg_box_repository)
-            except web.HTTPException as e:
-                raise Error(reason="Unauthorized - Invalid Bearer Token",
-                            status=401)
+        msg_box_external_id = self.request.match_info.get('channelid')
+        msg_box = msg_box_repository.get_msg_box(account_id, external_id)
+        if not msg_box:
+            return web.Response(reason="peer channel not found for external id: %s" % external_id,
+                status=404)
 
-            msg_box_external_id = self.request.match_info.get('channelid')
-            msg_box = msg_box_repository.get_msg_box(account_id, external_id)
-            if not msg_box:
-                raise Error(reason="peer channel not found for external id: %s" % external_id,
-                            status=404)
+        ws = web.WebSocketResponse()
+        await ws.prepare(self.request)
+        client = MsgBoxWSClient(
+            ws_id=ws_id, websocket=ws,
+            msg_box_internal_id=msg_box.id,
+        )
+        app_state.add_msg_box_ws_client(client)
+        self.logger.debug('%s connected. host=%s. channel_id=%s',
+            client.ws_id, self.request.host, msg_box_external_id)
 
-            ws = web.WebSocketResponse()
-            await ws.prepare(self.request)
-            client = MsgBoxWSClient(
-                ws_id=ws_id, websocket=ws,
-                msg_box_internal_id=msg_box.id,
-            )
-            app_state.add_msg_box_ws_client(client)
-            self.logger.debug('%s connected. host=%s. channel_id=%s',
-                client.ws_id, self.request.host, msg_box_external_id)
+        try:
             await self._handle_new_connection(client)
             return ws
         except Error as e:
             return web.Response(reason=e.reason, status=e.status)
         finally:
-            if ws and not ws.closed:
+            if not ws.closed:
                 await ws.close()
 
-            if self.request.app['msg_box_ws_clients'].get(ws_id):
-                self.logger.debug("removing msg box websocket id: %s", ws_id)
-                del self.request.app['msg_box_ws_clients'][ws_id]
+            self.logger.debug("removing msg box websocket id: %s", ws_id)
+            app_state.remove_msg_box_ws_client(ws_id)
 
     async def _handle_new_connection(self, client: MsgBoxWSClient) -> None:
         # self.msg_box_ws_clients = self.request.app['msg_box_ws_clients']

@@ -462,4 +462,34 @@ async def get_endpoints_data(request: web.Request) -> web.Response:
                 "baseUrl": "/api/v1/network",
             },
         ])
+    if os.environ.get('EXPOSE_INDEXER_APIS'):
+        data['endpoints'].extend([
+            {
+                "apiType": "bsvapi.transaction",
+                "apiVersion": 1,
+                "baseURL": "/api/v1/transaction",
+            },
+            {
+                "apiType": "bsvapi.merkle-proof",
+                "apiVersion": 1,
+                "baseURL": "/api/v1/merkle-proof",
+            },
+            {
+                "apiType": "bsvapi.output-spend",
+                "apiVersion": 1,
+                "baseURL": "/api/v1/output-spend",
+            },
+            {
+                "apiType": "bsvapi.restoration",
+                "apiVersion": 1,
+                "baseURL": "/api/v1/restoration",
+                "pricing": {
+                    "data": {
+                        "satoshis": 4524,
+                        "bytes": 10000000,
+                    }
+                }
+            }
+        ])
     return web.json_response(data=data)
+
