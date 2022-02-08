@@ -52,8 +52,10 @@ class GeneralWebSocket(web.View):
         account_id = app_state.temporary_account_id
 
         ws_id = str(uuid.uuid4())
-        accept_type = cast(AccountWebsocketMediaType,
-            self.request.headers.get('Accept', 'application/json'))
+        accept_type_text = self.request.headers.get('Accept', 'application/json')
+        if accept_type_text == "*/*":
+            accept_type_text = 'application/json'
+        accept_type = cast(AccountWebsocketMediaType, accept_type_text)
         websocket_response = web.WebSocketResponse()
         await websocket_response.prepare(self.request)
         websocket_state = AccountWebsocketState(

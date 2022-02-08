@@ -18,8 +18,8 @@ from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _
     WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels
 
 TEST_HOST = "127.0.0.1"
-TEST_PORT = 52462
-WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:52462/api/v1/channel/{channelid}/notify"
+TEST_PORT = 55666
+WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:55666/api/v1/channel/{channelid}/notify"
 
 PRIVATE_KEY_1 = PrivateKey.from_hex(
     "720f1987db69efa562b3dabd78e51f19bd8da76c70ad839b72b939f4071b144b")
@@ -44,9 +44,8 @@ class TestAiohttpRESTAPI:
     logger = logging.getLogger("test-aiohttp-rest-api")
 
     @classmethod
-    def setup_class(self) -> None:
-        logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
-            level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
+    def setup_class(cls) -> None:
+        pass
 
     def setup_method(self) -> None:
         pass
@@ -55,7 +54,7 @@ class TestAiohttpRESTAPI:
         pass
 
     @classmethod
-    def teardown_class(self) -> None:
+    def teardown_class(cls) -> None:
         pass
 
     async def _create_new_channel(self):
@@ -361,7 +360,10 @@ class TestAiohttpRESTAPI:
         request_body = {"key": "value"}
         url = route.url.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_write_message_no_content_type_should_raise_400 url: {url}")
-        result: requests.Response = _successful_call(url, route.http_method, None,
+        headers = {
+            "Content-Type": "",
+        }
+        result: requests.Response = _successful_call(url, route.http_method, headers,
             request_body, CHANNEL_BEARER_TOKEN)
         assert result.status_code == 400, result.reason
         assert result.reason is not None
@@ -661,7 +663,6 @@ class TestAiohttpRESTAPI:
         url = WS_URL_GENERAL
         asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
 
-    @pytest.mark.skip
     @pytest.mark.asyncio
     def test_general_purpose_websocket_peer_channel_notifications(self):
         logger = logging.getLogger("websocket-test")

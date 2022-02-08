@@ -25,10 +25,10 @@ from server import AiohttpServer, logger, get_app
 from unittests._endpoint_map import ENDPOINT_MAP
 
 TEST_HOST = "127.0.0.1"
-TEST_PORT = 52462
+TEST_PORT = 55666
 WS_URL_GENERAL = f"ws://localhost:{TEST_PORT}/api/v1/web-socket"
 WS_URL_HEADERS = f"ws://localhost:{TEST_PORT}/api/v1/headers/tips/websocket"
-WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:52462/api/v1/channel/{channelid}/notify"
+WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:55666/api/v1/channel/{channelid}/notify"
 
 REGTEST_GENESIS_BLOCK_HASH = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
 PRIVATE_KEY_1 = PrivateKey.from_hex(
@@ -186,10 +186,12 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
                             completion_event.set()
                             return
 
-                    if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR,
+                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR,
                                     aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
                         logger.info("CLOSED")
                         break
+                    else:
+                        assert False, f"Unexpected message type {msg.type}"
         except WSServerHandshakeError as e:
             if e.status == 401:
                 raise WebsocketUnauthorizedException()

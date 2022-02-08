@@ -18,9 +18,8 @@ class TestAiohttpRESTAPI:
     logger = logging.getLogger("TestAiohttpRESTAPI")
 
     @classmethod
-    def setup_class(self) -> None:
-        logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
-            level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
+    def setup_class(cls) -> None:
+        pass
 
     def setup_method(self) -> None:
         pass
@@ -29,7 +28,7 @@ class TestAiohttpRESTAPI:
         pass
 
     @classmethod
-    def teardown_class(self) -> None:
+    def teardown_class(cls) -> None:
         pass
 
     def test_get_headers_by_height(self) -> None:

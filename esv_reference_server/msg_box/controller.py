@@ -82,7 +82,8 @@ async def list_channels(request: web.Request) -> web.Response:
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     logger.info(f"Get list of message boxes for accountid: {account_id}.")
 
     msg_boxes: List[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
@@ -110,7 +111,8 @@ async def get_single_channel_details(request: web.Request) -> web.Response:
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     external_id = request.match_info['channelid']
 
     logger.info(f"Get message box by external_id {external_id} for account(id) {account_id}.")
@@ -139,7 +141,8 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
         # Todo - get the account_id from db and return HTTPNotFound if not found
         # Todo - check the account_id against the channel_id to ensure this user
         #  has the required read/write permissions
-        account_id = 0
+        account_id = app_state.temporary_account_id
+        assert account_id is not None
         external_id = request.match_info['channelid']
         body = await request.json()
         _msg_box_view_amend = MsgBoxViewModelAmend(public_read=body['public_read'],
@@ -175,7 +178,8 @@ async def delete_channel(request: web.Request) -> web.Response:
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     external_id = request.match_info['channelid']
 
     logger.info(f"Deleting message box by external_id {external_id} "
@@ -204,7 +208,8 @@ async def create_new_channel(request: web.Request) -> web.Response:
         # Todo - get the account_id from db and return HTTPNotFound if not found
         # Todo - check the account_id against the channel_id to ensure this user
         #  has the required read/write permissions
-        account_id = 0
+        account_id = app_state.temporary_account_id
+        assert account_id is not None
 
         logger.info(f"Creating new message box for account_id: {account_id}.")
         body = await request.json()
@@ -242,7 +247,8 @@ async def revoke_selected_token(request: web.Request) -> web.Response:
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     _external_id = request.match_info.get('channelid')
     token_id = request.match_info['tokenid']
     msg_box_repository.delete_api_token(int(token_id))
@@ -265,7 +271,8 @@ async def get_token_details(request: web.Request) -> web.Response:
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     _external_id = request.match_info['channelid']
     token_id = request.match_info['tokenid']
 
@@ -291,7 +298,8 @@ async def get_list_of_tokens(request: web.Request) -> web.Response:
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     external_id = request.match_info['channelid']
     token = request.query.get('token')
 
@@ -318,7 +326,8 @@ async def create_new_token_for_channel(request: web.Request) -> web.Response:
         # Todo - get the account_id from db and return HTTPNotFound if not found
         # Todo - check the account_id against the channel_id to ensure this user
         #  has the required read/write permissions
-        account_id = 0
+        account_id = app_state.temporary_account_id
+        assert account_id is not None
         external_id = request.match_info['channelid']
 
         msg_box = msg_box_repository.get_msg_box(account_id, external_id)
@@ -347,7 +356,8 @@ async def write_message(request: web.Request) -> web.Response:
     db: SQLiteDatabase = app_state.sqlite_db
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     external_id = request.match_info.get('channelid')
     if not external_id:
         raise web.HTTPNotFound(reason="channel id wasn't provided")
@@ -569,7 +579,8 @@ async def delete_message(request: web.Request) -> web.Response:
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
     accept_type = request.headers.get('Accept', 'application/json')
 
-    account_id = 0
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
     external_id = request.match_info.get('channelid')
     if not external_id:
         raise web.HTTPNotFound(reason="channel id wasn't provided")
@@ -636,7 +647,8 @@ class MsgBoxWebSocket(web.View):
             raise Error(reason=errors.NoBearerToken.reason,
                         status=errors.NoBearerToken.status)
 
-        account_id = 0
+        account_id = app_state.temporary_account_id
+        assert account_id is not None
         try:
             _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token,
                                     external_id, msg_box_repository)
