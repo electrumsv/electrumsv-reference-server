@@ -5,10 +5,9 @@ import asyncio
 import logging
 import typing
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Tuple
+from typing import Optional
 
 from aiohttp import web
-from aiohttp.abc import Application
 from aiohttp.web_app import Application
 
 from esv_reference_server.server import get_aiohttp_app
@@ -23,14 +22,14 @@ FULL_LOG_PATH = MODULE_DIR / 'logs' / 'esv_reference_server.log'
 logger = logging.getLogger("server")
 
 
-def create_log_file_if_not_exist():
+def create_log_file_if_not_exist() -> None:
     if not Path(FULL_LOG_PATH).exists():
         os.makedirs(os.path.dirname(FULL_LOG_PATH), exist_ok=True)
         with open(FULL_LOG_PATH, 'w') as f:
             f.write('')
 
 
-def setup_logging():
+def setup_logging() -> None:
     create_log_file_if_not_exist()
     logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
         level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')

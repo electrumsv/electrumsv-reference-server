@@ -1,10 +1,6 @@
 import asyncio
-import json
 import logging
-import os
-import threading
-import time
-from typing import Union
+from typing import Union, Optional
 
 import aiohttp
 import pytest
@@ -12,27 +8,19 @@ import requests
 from _pytest.outcomes import Skipped
 from aiohttp import WSServerHandshakeError
 
-from unittests.conftest import API_ROUTE_DEFS, _successful_call, TEST_MASTER_BEARER_TOKEN, \
+from unittests._endpoint_map import ENDPOINT_MAP
+from unittests.conftest import _successful_call, TEST_MASTER_BEARER_TOKEN, \
     _assert_tip_structure_correct, REGTEST_GENESIS_BLOCK_HASH, \
-    WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct, \
-    _is_server_running, electrumsv_reference_server_thread, app, host, port
+    WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct
 
 
 class TestAiohttpRESTAPI:
+    logger = logging.getLogger("TestAiohttpRESTAPI")
 
     @classmethod
     def setup_class(self) -> None:
-        self.logger = logging.getLogger("TestAiohttpRESTAPI")
         logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
             level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
-
-        route = API_ROUTE_DEFS['ping']
-        if not _is_server_running(route.url):
-            thread = threading.Thread(target=electrumsv_reference_server_thread,
-                                      args=(app, host, port),
-                                      daemon=True)
-            thread.start()
-            time.sleep(3)
 
     def setup_method(self) -> None:
         pass
@@ -44,7 +32,7 @@ class TestAiohttpRESTAPI:
     def teardown_class(self) -> None:
         pass
 
-    def test_get_headers_by_height(self):
+    def test_get_headers_by_height(self) -> None:
         expected = [
             {'hash': '0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206',
              'version': 1,
@@ -56,7 +44,7 @@ class TestAiohttpRESTAPI:
              'transactionCount': 0,
              'work': 2}
         ]
-        route = API_ROUTE_DEFS['get_headers_by_height']
+        route = ENDPOINT_MAP['get_headers_by_height']
         self.logger.debug(f"test_get_headers_by_height url: {route.url}")
         result: requests.Response = _successful_call(route.url + "?height=0", route.http_method, None,
             good_bearer_token=TEST_MASTER_BEARER_TOKEN)
@@ -65,7 +53,7 @@ class TestAiohttpRESTAPI:
 
         assert expected == result.json()
 
-    def test_get_header(self):
+    def test_get_header(self) -> None:
         expected = {
             'hash': '0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206',
             'version': 1,
@@ -77,7 +65,7 @@ class TestAiohttpRESTAPI:
             'transactionCount': 0,
             'work': 2
         }
-        route = API_ROUTE_DEFS['get_header']
+        route = ENDPOINT_MAP['get_header']
         self.logger.debug(f"test_get_header url: {route.url}")
         result: requests.Response = _successful_call(route.url.format(
             hash=REGTEST_GENESIS_BLOCK_HASH),
@@ -87,14 +75,14 @@ class TestAiohttpRESTAPI:
 
         assert expected == result.json()
 
-    def test_get_header_binary(self):
+    def test_get_header_binary(self) -> None:
         expected = \
             b'\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' \
             b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' \
             b';\xa3\xed\xfdz{\x12\xb2z\xc7,>gv\x8fa\x7f\xc8\x1b\xc3\x88\x8aQ2:\x9f\xb8' \
             b'\xaaK\x1e^J\xda\xe5IM\xff\xff\x7f \x02\x00\x00\x00'
 
-        route = API_ROUTE_DEFS['get_header']
+        route = ENDPOINT_MAP['get_header']
         self.logger.debug(f"test_get_header url: {route.url}")
         request_headers = {'Accept': 'application/octet-stream'}
         result: requests.Response = _successful_call(route.url.format(
@@ -104,8 +92,8 @@ class TestAiohttpRESTAPI:
             pytest.skip(result.reason)
         assert expected == result.content
 
-    def test_get_chain_tips_json(self):
-        route = API_ROUTE_DEFS['get_chain_tips']
+    def test_get_chain_tips_json(self) -> None:
+        route = ENDPOINT_MAP['get_chain_tips']
         self.logger.debug(f"test_get_chain_tips url: {route.url}")
         result: requests.Response = _successful_call(route.url + "?longest_chain=1",
             route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
@@ -116,8 +104,8 @@ class TestAiohttpRESTAPI:
         assert isinstance(response_json, list)
         _assert_tip_structure_correct(response_json[0])
 
-    def test_get_chain_tips_binary(self):
-        route = API_ROUTE_DEFS['get_chain_tips']
+    def test_get_chain_tips_binary(self) -> None:
+        route = ENDPOINT_MAP['get_chain_tips']
         self.logger.debug(f"test_get_chain_tips url: {route.url}")
         request_headers = {'Accept': 'application/octet-stream'}
         result: requests.Response = _successful_call(route.url + "?longest_chain=1",
@@ -129,8 +117,8 @@ class TestAiohttpRESTAPI:
         assert isinstance(response, bytes)
         _assert_binary_tip_structure_correct(response)
 
-    def test_get_peers(self):
-        route = API_ROUTE_DEFS['get_peers']
+    def test_get_peers(self) -> None:
+        route = ENDPOINT_MAP['get_peers']
         self.logger.debug(f"test_get_peers url: {route.url}")
         result: requests.Response = _successful_call(route.url,
             route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
@@ -141,8 +129,8 @@ class TestAiohttpRESTAPI:
             assert isinstance(peer['ip'], str)
             assert isinstance(peer['port'], int)
 
-    async def _subscribe_to_headers_notifications(self, api_token: str, expected_count: int,
-        completion_event: asyncio.Event) -> Union[bool, Skipped]:
+    async def _subscribe_to_headers_notifications(self, expected_count: int,
+            completion_event: asyncio.Event) -> bool:
         count = 0
         try:
             async with aiohttp.ClientSession() as session:
@@ -163,48 +151,51 @@ class TestAiohttpRESTAPI:
                             completion_event.set()
                             return result
                         if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            break
+                            return False
+            return False
         except WSServerHandshakeError as e:
             raise e
         except Exception:
             self.logger.exception("Unexpected exception in _subscribe_to_headers_notifications")
+            return False
 
-    def test_headers_websocket(self):
+    def test_headers_websocket(self) -> Optional[Skipped]:
         # Skip if HeaderSV APIs unavailable
-        route = API_ROUTE_DEFS['get_chain_tips']
+        route = ENDPOINT_MAP['get_chain_tips']
         self.logger.debug(f"test_get_chain_tips url: {route.url}")
         result: requests.Response = _successful_call(route.url,
             route.http_method, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
 
-        async def wait_on_sub(api_token: str, expected_count: int, completion_event: asyncio.Event):
+        async def wait_on_sub(expected_count: int, completion_event: asyncio.Event) -> None:
             try:
-                await self._subscribe_to_headers_notifications(api_token, expected_count, completion_event)
+                await self._subscribe_to_headers_notifications(expected_count, completion_event)
             except WSServerHandshakeError as e:
                 if e.status == 401:
                     self.logger.debug(f"Unauthorized - Bad Bearer Token")
                     assert False  # i.e. auth should have passed
 
-        async def mine_blocks(expected_msg_count: int):
+        async def mine_blocks(expected_msg_count: int) -> Optional[str]:
             for i in range(expected_msg_count):
                 url = "http://rpcuser:rpcpassword@127.0.0.1:18332"
                 try:
                     async with aiohttp.ClientSession() as session:
-                        request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1], "id": 1}
+                        request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
+                                        "id": 1}
                         async with session.post(url, json=request_body) as resp:
                             self.logger.debug(f"mine_blocks = {await resp.json()}")
                             assert resp.status == 200, resp.reason
                     await asyncio.sleep(2)
                 except aiohttp.ClientConnectorError:
                     return "SKIP"
+            return None
 
-        async def main():
+        async def main() -> Optional[Skipped]:
             EXPECTED_MSG_COUNT = 2
 
             completion_event = asyncio.Event()
-            fut1 = asyncio.create_task(wait_on_sub(TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
-                completion_event))
+            fut1 = asyncio.create_task(wait_on_sub(EXPECTED_MSG_COUNT, completion_event))
             await asyncio.sleep(3)
             result = await mine_blocks(EXPECTED_MSG_COUNT)
             if result == "SKIP":
@@ -212,35 +203,6 @@ class TestAiohttpRESTAPI:
                 return pytest.skip("Bitcoin Regtest node unavailable")
             await completion_event.wait()
             fut1.result()  # skip or pass
+            return None
 
-        asyncio.run(main())
-
-        # Test tip notifications
-        async def mine_blocks(expected_msg_count: int):
-            for i in range(expected_msg_count):
-                url = "http://rpcuser:rpcpassword@127.0.0.1:18332"
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1], "id": 1}
-                        async with session.post(url, json=request_body) as resp:
-                            self.logger.debug(f"mine_blocks = {await resp.json()}")
-                            assert resp.status == 200, resp.reason
-                    await asyncio.sleep(2)
-                except aiohttp.ClientConnectorError:
-                    return "SKIP"
-
-        async def main():
-            EXPECTED_MSG_COUNT = 2
-
-            completion_event = asyncio.Event()
-            fut1 = asyncio.create_task(wait_on_sub(TEST_MASTER_BEARER_TOKEN,
-                EXPECTED_MSG_COUNT, completion_event))
-            await asyncio.sleep(3)
-            result = await mine_blocks(EXPECTED_MSG_COUNT)
-            if result == "SKIP":
-                fut1.cancel()
-                return pytest.skip("Bitcoin Regtest node unavailable")
-            await completion_event.wait()
-            fut1.result()  # skip or pass
-
-        asyncio.run(main())
+        return asyncio.run(main())
