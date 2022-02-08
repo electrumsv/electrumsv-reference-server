@@ -42,7 +42,8 @@ async def get_header(request: web.Request) -> web.Response:
             return web.Response(body=result, status=200, reason='OK', headers=response_headers)
 
         # else: application/json
-        request_headers = {'Content-Type': 'application/json'}  # Should be 'Accept'
+        # TODO(1.4.0) HeaderSV. Something needs to be fixed here and should be documented.
+        request_headers = {'Content-Type': 'application/json'}
         async with client_session.get(url_to_fetch, headers=request_headers) as response:
             if response.status != 200:
                 return web.Response(reason=response.reason, status=response.status)
