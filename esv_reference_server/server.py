@@ -172,7 +172,8 @@ class ApplicationState(object):
                     await asyncio.sleep(1)
                     continue
 
-                if not len(self.get_headers_ws_clients()) and not len(self.get_account_websockets()):
+                if not len(self.get_headers_ws_clients()) and \
+                        not len(self.get_account_websockets()):
                     continue
 
                 url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"

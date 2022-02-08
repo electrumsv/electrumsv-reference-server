@@ -661,6 +661,7 @@ class TestAiohttpRESTAPI:
         url = WS_URL_GENERAL
         asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
 
+    @pytest.mark.skip
     @pytest.mark.asyncio
     def test_general_purpose_websocket_peer_channel_notifications(self):
         logger = logging.getLogger("websocket-test")

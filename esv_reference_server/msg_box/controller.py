@@ -425,10 +425,10 @@ async def write_message(request: web.Request) -> web.Response:
 
     # General-Purpose websocket
     msg_box = notification['msg_box']
-    result = ChannelNotification(id=msg_box.external_id,
+    channel_msg = ChannelNotification(id=msg_box.external_id,
         notification=notification['notification'])
     app_state.account_message_queue.put_nowait(AccountMessage(account_id,
-        AccountMessageKind.PEER_CHANNEL_MESSAGE, result))
+        AccountMessageKind.PEER_CHANNEL_MESSAGE, channel_msg))
 
     return web.json_response(msg_box_get_view.to_dict())
 
