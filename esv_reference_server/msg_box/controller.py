@@ -366,8 +366,6 @@ async def write_message(request: web.Request) -> web.Response:
 
     MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH', '0'))
 
-    with open(r"c:\data\x.txt", "w+") as f:
-        f.write("%s\n" % request.content_type)
     if request.content_type is None or request.content_type == '':
         raise web.HTTPBadRequest(reason="missing content type header")
 
