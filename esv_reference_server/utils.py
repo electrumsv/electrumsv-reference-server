@@ -5,7 +5,6 @@ from typing import Any, Optional, TYPE_CHECKING
 from aiohttp import web
 
 from .constants import AccountMessageKind
-from .types import ChannelNotification
 
 if TYPE_CHECKING:
     from .sqlite_db import SQLiteDatabase
@@ -41,7 +40,7 @@ def pack_account_message_bytes(message_kind: AccountMessageKind, message_data: A
     message_bytes = struct.pack(">I", message_kind)
     if message_kind == AccountMessageKind.PEER_CHANNEL_MESSAGE:
         # Just use the same JSON format for now.
-        assert isinstance(message_data, ChannelNotification)
+        assert isinstance(message_data, dict)
         message_bytes += json.dumps(message_data).encode()
     elif message_kind == AccountMessageKind.SPENT_OUTPUT_EVENT:
         assert isinstance(message_data, bytes)

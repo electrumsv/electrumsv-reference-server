@@ -1,6 +1,7 @@
 import base64
 import logging
 import struct
+import time
 
 import aiohttp
 import asyncio
@@ -11,14 +12,17 @@ import threading
 from pathlib import Path
 from typing import Optional, Dict
 
+import pytest
 from aiohttp.abc import Application
 from bitcoinx import PublicKey, PrivateKey
 import requests
 from aiohttp import WSServerHandshakeError
 
 from esv_reference_server.errors import WebsocketUnauthorizedException
+from esv_reference_server.sqlite_db import SQLiteDatabase
 
 from server import AiohttpServer, logger, get_app
+from unittests._endpoint_map import ENDPOINT_MAP
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 52462
@@ -45,7 +49,7 @@ CHANNEL_READ_ONLY_TOKEN: str = ""
 CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 
 
-async def main(app: Application, host: str, port: int):
+async def main(app: Application, host: str, port: int) -> None:
     server = AiohttpServer(app, host, port)
     try:
         await server.start()
@@ -54,7 +58,7 @@ async def main(app: Application, host: str, port: int):
 
 
 def electrumsv_reference_server_thread(app: Application, host: str = TEST_HOST,
-        port: int = TEST_PORT):
+        port: int = TEST_PORT) -> None:
     """Launches the ESV-Reference-Server to run in the background but with a test database"""
     try:
         asyncio.run(main(app, host, port))
@@ -75,7 +79,7 @@ def _no_auth(url: str, method: str):
     assert result.reason is not None  # {"authorization": "is required"}
 
 
-def _wrong_auth_type(url: str, method: str):
+def _wrong_auth_type(url: str, method: str) -> None:
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     # No auth -> 400 {"authorization": "is required"}
@@ -87,7 +91,7 @@ def _wrong_auth_type(url: str, method: str):
 
 
 def _bad_token(url: str, method: str, headers: Optional[dict] = None,
-               body: Optional[dict] = None):
+               body: Optional[dict] = None) -> None:
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     if not headers:
@@ -109,7 +113,7 @@ def _successful_call(url: str, method: str, headers: Optional[dict] = None,
     return request_call(url, data=json.dumps(request_body), headers=headers)
 
 
-def _assert_tip_notification_structure(tip_notification: bytes):
+def _assert_tip_notification_structure(tip_notification: bytes) -> bool:
     assert len(tip_notification) == 84
     height = struct.unpack('<I', tip_notification[80:84])[0]
     assert isinstance(height, int)
@@ -191,7 +195,7 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
                 raise WebsocketUnauthorizedException()
 
 
-def _is_server_running(url):
+def _is_server_running(url) -> bool:
     try:
         result = requests.get(url)
         if result.status_code == 200:
@@ -202,8 +206,28 @@ def _is_server_running(url):
         return False
 
 
-# Global, shared singleton
-app, host, port = get_app(TEST_HOST, TEST_PORT)
-API_ROUTE_DEFS = app.API_ROUTE_DEFS
-# for route in self.API_ROUTE_DEFS.items():
-#     print(route)
+@pytest.fixture(scope="session", autouse=True)
+def run_server() -> None:
+    os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
+    os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
+    os.environ['SKIP_DOTENV_FILE'] = '1'
+    os.environ['REFERENCE_SERVER_RESET'] = '0'
+    os.environ['DATASTORE_LOCATION'] = str(MODULE_DIR.joinpath("test_sqlite.sqlite"))
+    os.environ['NOTIFICATION_TEXT_NEW_MESSAGE'] = 'New message arrived'
+    os.environ['MAX_MESSAGE_CONTENT_LENGTH'] = '65536'
+    os.environ['CHUNKED_BUFFER_SIZE'] = '1024'
+
+    # Reset db before use
+    datastore_location = Path(os.environ['DATASTORE_LOCATION'])
+    sqlite_db: SQLiteDatabase = SQLiteDatabase(datastore_location)
+    sqlite_db.drop_tables()
+
+    app, host, port = get_app(TEST_HOST, TEST_PORT)
+    thread = threading.Thread(target=electrumsv_reference_server_thread,
+                              args=(app, host, port),
+                              daemon=True)
+    thread.start()
+    time.sleep(3)
+    yield app
+
+    # Teardown logic here...

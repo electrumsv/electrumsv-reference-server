@@ -77,7 +77,8 @@ class AccountMessageKind(IntEnum):
     PEER_CHANNEL_MESSAGE = 1
     SPENT_OUTPUT_EVENT = 2
 
+
 ACCOUNT_MESSAGE_NAMES: dict[AccountMessageKind, str] = {
     AccountMessageKind.PEER_CHANNEL_MESSAGE: "bsvapi.channels.notification",
-    AccountMessageKind.PEER_CHANNEL_MESSAGE: "bsvapi.output-spends.notification",
+    AccountMessageKind.SPENT_OUTPUT_EVENT: "bsvapi.output-spends.notification",
 }
