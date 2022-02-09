@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Union, Optional
+from typing import Optional
 
 import aiohttp
 import pytest
@@ -8,7 +8,6 @@ import requests
 from _pytest.outcomes import Skipped
 from aiohttp import WSServerHandshakeError
 
-from unittests._endpoint_map import ENDPOINT_MAP
 from unittests.conftest import _successful_call, TEST_MASTER_BEARER_TOKEN, \
     _assert_tip_structure_correct, REGTEST_GENESIS_BLOCK_HASH, \
     WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct
@@ -43,9 +42,11 @@ class TestAiohttpRESTAPI:
              'transactionCount': 0,
              'work': 2}
         ]
-        route = ENDPOINT_MAP['get_headers_by_height']
-        self.logger.debug(f"test_get_headers_by_height url: {route.url}")
-        result: requests.Response = _successful_call(route.url + "?height=0", route.http_method, None,
+        query_params = '?height=0'
+        URL = 'http://127.0.0.1:55666/api/v1/headers/by-height' + query_params
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_headers_by_height url: {URL}")
+        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
             good_bearer_token=TEST_MASTER_BEARER_TOKEN)
         if result.status_code == 503:
             pytest.skip(result.reason)
@@ -64,11 +65,10 @@ class TestAiohttpRESTAPI:
             'transactionCount': 0,
             'work': 2
         }
-        route = ENDPOINT_MAP['get_header']
-        self.logger.debug(f"test_get_header url: {route.url}")
-        result: requests.Response = _successful_call(route.url.format(
-            hash=REGTEST_GENESIS_BLOCK_HASH),
-            route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        URL = 'http://127.0.0.1:55666/api/v1/headers/{hash}'.format(hash=REGTEST_GENESIS_BLOCK_HASH)
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_header url: {URL}")
+        result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
 
@@ -81,21 +81,22 @@ class TestAiohttpRESTAPI:
             b';\xa3\xed\xfdz{\x12\xb2z\xc7,>gv\x8fa\x7f\xc8\x1b\xc3\x88\x8aQ2:\x9f\xb8' \
             b'\xaaK\x1e^J\xda\xe5IM\xff\xff\x7f \x02\x00\x00\x00'
 
-        route = ENDPOINT_MAP['get_header']
-        self.logger.debug(f"test_get_header url: {route.url}")
+        URL = 'http://127.0.0.1:55666/api/v1/headers/{hash}'.format(hash=REGTEST_GENESIS_BLOCK_HASH)
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_header url: {URL}")
         request_headers = {'Accept': 'application/octet-stream'}
-        result: requests.Response = _successful_call(route.url.format(
-            hash=REGTEST_GENESIS_BLOCK_HASH),
-            route.http_method, request_headers, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        result: requests.Response = _successful_call(URL, HTTP_METHOD, request_headers)
         if result.status_code == 503:
             pytest.skip(result.reason)
         assert expected == result.content
 
     def test_get_chain_tips_json(self) -> None:
-        route = ENDPOINT_MAP['get_chain_tips']
-        self.logger.debug(f"test_get_chain_tips url: {route.url}")
-        result: requests.Response = _successful_call(route.url + "?longest_chain=1",
-            route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        query_params = '?longest_chain=1'
+        URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_chain_tips url: {URL}")
+        result: requests.Response = _successful_call(URL,
+            HTTP_METHOD, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
 
@@ -104,11 +105,13 @@ class TestAiohttpRESTAPI:
         _assert_tip_structure_correct(response_json[0])
 
     def test_get_chain_tips_binary(self) -> None:
-        route = ENDPOINT_MAP['get_chain_tips']
-        self.logger.debug(f"test_get_chain_tips url: {route.url}")
+        query_params = '?longest_chain=1'
+        URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_chain_tips url: {URL}")
         request_headers = {'Accept': 'application/octet-stream'}
-        result: requests.Response = _successful_call(route.url + "?longest_chain=1",
-            route.http_method, request_headers, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        result: requests.Response = _successful_call(URL,
+            HTTP_METHOD, request_headers)
         if result.status_code == 503:
             pytest.skip(result.reason)
 
@@ -117,10 +120,10 @@ class TestAiohttpRESTAPI:
         _assert_binary_tip_structure_correct(response)
 
     def test_get_peers(self) -> None:
-        route = ENDPOINT_MAP['get_peers']
-        self.logger.debug(f"test_get_peers url: {route.url}")
-        result: requests.Response = _successful_call(route.url,
-            route.http_method, None, good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        URL = 'http://127.0.0.1:55666/api/v1/network/peers'
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_peers url: {URL}")
+        result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
 
@@ -160,10 +163,12 @@ class TestAiohttpRESTAPI:
 
     def test_headers_websocket(self) -> Optional[Skipped]:
         # Skip if HeaderSV APIs unavailable
-        route = ENDPOINT_MAP['get_chain_tips']
-        self.logger.debug(f"test_get_chain_tips url: {route.url}")
-        result: requests.Response = _successful_call(route.url,
-            route.http_method, None)
+        query_params = '?longest_chain=1'
+        URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
+        HTTP_METHOD = 'get'
+        self.logger.debug(f"test_get_chain_tips url: {URL}")
+        result: requests.Response = _successful_call(URL,
+            HTTP_METHOD, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
 
