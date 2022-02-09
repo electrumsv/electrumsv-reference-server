@@ -22,7 +22,6 @@ from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.sqlite_db import SQLiteDatabase
 
 from server import AiohttpServer, logger, get_app
-from unittests._endpoint_map import ENDPOINT_MAP
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 55666
@@ -96,7 +95,7 @@ def _bad_token(url: str, method: str, headers: Optional[dict] = None,
     request_call = getattr(requests, method.lower())
     if not headers:
         headers = {}
-    headers["Authorization"] = "Bearer <bad bearer token>"
+    headers["Authorization"] = "Bearer bad bearer token"
     result = request_call(url, headers=headers, json=body)
     assert result.status_code == 401, result.reason
     assert result.reason is not None
