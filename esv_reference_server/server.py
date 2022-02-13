@@ -17,8 +17,6 @@ import logging
 import threading
 from typing import Any, AsyncIterator, Optional
 
-from aiohttp.web_app import Application
-
 from .constants import ACCOUNT_MESSAGE_NAMES, Network, SERVER_HOST, SERVER_PORT
 from . import handlers, handlers_headers, handlers_indexer
 from .indexer_support import maintain_indexer_connection, unregister_unwanted_spent_outputs

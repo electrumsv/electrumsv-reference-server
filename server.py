@@ -8,7 +8,6 @@ from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 from aiohttp import web
-from aiohttp.web_app import Application
 
 from esv_reference_server.server import get_aiohttp_app, AiohttpApplication
 from esv_reference_server.constants import SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
@@ -102,7 +101,8 @@ def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
     setup_logging()
     dotenv_path = MODULE_DIR.joinpath('.env')
 
-    if not os.getenv("SKIP_DOTENV_FILE") == '1':  # Used for unit testing to override usual configuration
+    # Used for unit testing to override usual configuration
+    if not os.getenv("SKIP_DOTENV_FILE") == '1':
         load_dotenv(dotenv_path)
 
     human_readable_network = os.getenv('NETWORK', 'regtest')
