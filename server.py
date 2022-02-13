@@ -10,7 +10,7 @@ from typing import Optional
 from aiohttp import web
 from aiohttp.web_app import Application
 
-from esv_reference_server.server import get_aiohttp_app
+from esv_reference_server.server import get_aiohttp_app, AiohttpApplication
 from esv_reference_server.constants import SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
 
 if typing.TYPE_CHECKING:
@@ -42,7 +42,7 @@ def setup_logging() -> None:
 
 class AiohttpServer:
 
-    def __init__(self, app: web.Application, host: str = SERVER_HOST,
+    def __init__(self, app: AiohttpApplication, host: str = SERVER_HOST,
             port: int = SERVER_PORT) -> None:
         self.runner: Optional[web.AppRunner] = None
         self.app = app
@@ -83,7 +83,7 @@ class AiohttpServer:
         await self.runner.cleanup()
 
 
-def load_dotenv(dotenv_path):
+def load_dotenv(dotenv_path: Path) -> None:
     with open(dotenv_path, 'r') as f:
         lines = f.readlines()
         for line in lines:
@@ -97,7 +97,8 @@ def load_dotenv(dotenv_path):
             os.environ[key] = val
 
 
-def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) -> tuple[Application, str, int]:
+def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
+        -> tuple[AiohttpApplication, str, int]:
     setup_logging()
     dotenv_path = MODULE_DIR.joinpath('.env')
 
@@ -109,14 +110,14 @@ def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) -> tuple[Applicati
     logger.debug(f"Running in {human_readable_network} mode")
 
     DEFAULT_DATASTORE_LOCATION = MODULE_DIR / 'esv_reference_server.sqlite'
-    datastore_location = os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION)
+    datastore_location = Path(os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION))
     logger.debug("Datastore location %s", datastore_location)
 
     app = get_aiohttp_app(network_enum, datastore_location, host, port)
     return app
 
 
-async def main():
+async def main() -> None:
     app, host, port = get_app()
     server = AiohttpServer(app, host, port)
     try:

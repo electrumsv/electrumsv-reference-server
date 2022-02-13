@@ -1,24 +1,23 @@
 import base64
-import logging
-import struct
-import time
-
-import aiohttp
-import asyncio
 import json
+import logging
 import os
+from pathlib import Path
+import struct
 import sys
 import threading
-from pathlib import Path
-from typing import Optional, Dict
+import time
+from typing import Any, cast, Generator, Optional
 
-import pytest
-from aiohttp.abc import Application
-from bitcoinx import PublicKey, PrivateKey
-import requests
+import aiohttp
 from aiohttp import WSServerHandshakeError
+import asyncio
+from bitcoinx import PublicKey, PrivateKey
+import pytest
+import requests
 
 from esv_reference_server.errors import WebsocketUnauthorizedException
+from esv_reference_server.server import AiohttpApplication
 from esv_reference_server.sqlite_db import SQLiteDatabase
 
 from server import AiohttpServer, logger, get_app
@@ -48,7 +47,7 @@ CHANNEL_READ_ONLY_TOKEN: str = ""
 CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 
 
-async def main(app: Application, host: str, port: int) -> None:
+async def main(app: AiohttpApplication, host: str, port: int) -> None:
     server = AiohttpServer(app, host, port)
     try:
         await server.start()
@@ -56,7 +55,7 @@ async def main(app: Application, host: str, port: int) -> None:
         await server.stop()
 
 
-def electrumsv_reference_server_thread(app: Application, host: str = TEST_HOST,
+def electrumsv_reference_server_thread(app: AiohttpApplication, host: str = TEST_HOST,
         port: int = TEST_PORT) -> None:
     """Launches the ESV-Reference-Server to run in the background but with a test database"""
     try:
@@ -70,7 +69,7 @@ def electrumsv_reference_server_thread(app: Application, host: str = TEST_HOST,
         logger.info("ElectrumSV Reference Server stopped")
 
 
-def _no_auth(url: str, method: str):
+def _no_auth(url: str, method: str) -> None:
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     result = request_call(url)
@@ -89,27 +88,28 @@ def _wrong_auth_type(url: str, method: str) -> None:
     assert result.reason is not None
 
 
-def _bad_token(url: str, method: str, headers: Optional[dict] = None,
-               body: Optional[dict] = None) -> None:
+def _bad_token(url: str, method: str, headers: Optional[dict[str, str]] = None) -> None:
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     if not headers:
         headers = {}
     headers["Authorization"] = "Bearer bad bearer token"
-    result = request_call(url, headers=headers, json=body)
+    result = request_call(url, headers=headers)
     assert result.status_code == 401, result.reason
     assert result.reason is not None
 
 
-def _successful_call(url: str, method: str, headers: Optional[dict] = None,
-                     request_body: Optional[dict] = None, good_bearer_token: Optional[str] = None):
+def _successful_call(url: str, method: str, headers: Optional[dict[str, str]] = None,
+                     request_body: Optional[dict[str, Any]] = None,
+                     good_bearer_token: Optional[str] = None) -> requests.Response:
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     if not headers:
         headers = {}
     if good_bearer_token:
         headers["Authorization"] = f"Bearer {good_bearer_token}"
-    return request_call(url, data=json.dumps(request_body), headers=headers)
+    return cast(requests.Response,
+        request_call(url, data=json.dumps(request_body), headers=headers))
 
 
 def _assert_tip_notification_structure(tip_notification: bytes) -> bool:
@@ -119,7 +119,7 @@ def _assert_tip_notification_structure(tip_notification: bytes) -> bool:
     return True
 
 
-def _assert_header_structure(header: Dict) -> bool:
+def _assert_header_structure(header: dict[str, str]) -> bool:
     assert isinstance(header['hash'], str)
     assert len(header['hash']) == 64
     assert isinstance(header['version'], int)
@@ -136,7 +136,7 @@ def _assert_header_structure(header: Dict) -> bool:
     return True
 
 
-def _assert_tip_structure_correct(tip: Dict) -> bool:
+def _assert_tip_structure_correct(tip: dict[str, Any]) -> bool:
     assert isinstance(tip, dict)
     assert tip['header'] is not None
     header = tip['header']
@@ -167,12 +167,11 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
 
                 logger.info(f'Connected to {url}')
                 async for msg in ws:
-                    msg: aiohttp.WSMessage
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         content = json.loads(msg.data)
                         logger.info(f'New message: {content}')
                         assert content['message_type'] == 'bsvapi.channels.notification'
-                        assert isinstance(content['result'], Dict)
+                        assert isinstance(content['result'], dict)
                         assert isinstance(content['result']['id'], str)
                         channel_id_bytes = base64.urlsafe_b64decode(content['result']['id'])
                         assert len(channel_id_bytes) == 64
@@ -196,7 +195,7 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
                 raise WebsocketUnauthorizedException()
 
 
-def _is_server_running(url) -> bool:
+def _is_server_running(url: str) -> bool:
     try:
         result = requests.get(url)
         if result.status_code == 200:
@@ -208,7 +207,7 @@ def _is_server_running(url) -> bool:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def run_server() -> None:
+def run_server() -> Generator[AiohttpApplication, None, None]:
     os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
     os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
     os.environ['SKIP_DOTENV_FILE'] = '1'

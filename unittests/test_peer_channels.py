@@ -28,7 +28,8 @@ REF_TYPE_OUTPUT = 0
 REF_TYPE_INPUT = 1
 STREAM_TERMINATION_BYTE = b"\x00"
 
-TEST_MASTER_BEARER_TOKEN = "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
+TEST_MASTER_BEARER_TOKEN = \
+    "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 CHANNEL_ID: str = ""
@@ -56,7 +57,7 @@ class TestAiohttpRESTAPI:
     def teardown_class(cls) -> None:
         pass
 
-    async def _create_new_channel(self):
+    async def _create_new_channel(self) -> tuple[str, str, str]:
         URL = 'http://127.0.0.1:55666/api/v1/channel/manage'
         request_body = {
             "public_read": True,
@@ -81,7 +82,7 @@ class TestAiohttpRESTAPI:
                 CHANNEL_BEARER_TOKEN_ID = single_channel_data['access_tokens'][0]['id']
                 return CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID
 
-    async def _create_read_only_token(self, CHANNEL_ID):
+    async def _create_read_only_token(self, CHANNEL_ID: str) -> tuple[str, str]:
         URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token'
         request_body = {
             "description": "websocket read only token",
@@ -101,13 +102,13 @@ class TestAiohttpRESTAPI:
                 return CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN
 
     @pytest.mark.asyncio
-    def test_ping(self):
+    def test_ping(self) -> None:
         URL = 'http://127.0.0.1:55666/'
         result = requests.get(URL)
         assert result.text is not None
 
     @pytest.mark.asyncio
-    def test_create_new_channel(self):
+    def test_create_new_channel(self) -> None:
         URL = 'http://127.0.0.1:55666/api/v1/channel/manage'
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
@@ -125,7 +126,7 @@ class TestAiohttpRESTAPI:
             }
         }
         self.logger.debug(f"test_create_new_channel url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
         assert result.status_code == 200, result.reason
@@ -135,21 +136,24 @@ class TestAiohttpRESTAPI:
 
         single_channel_data = response_body
         CHANNEL_ID = single_channel_data['id']
-        assert single_channel_data['href'] == f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+        assert single_channel_data['href'] == \
+            f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
         assert single_channel_data['public_write'] is True
         assert single_channel_data['sequenced'] is True
-        assert single_channel_data['retention'] == {"min_age_days": 0, "max_age_days": 0, "auto_prune": True}
+        assert single_channel_data['retention'] == {"min_age_days": 0, "max_age_days": 0, \
+            "auto_prune": True}
         assert isinstance(single_channel_data['access_tokens'], list)
         assert single_channel_data['access_tokens'][0]['id'] == 1
-        issued_token_bytes = base64.urlsafe_b64decode(single_channel_data['access_tokens'][0]['token'])
+        issued_token_bytes = \
+            base64.urlsafe_b64decode(single_channel_data['access_tokens'][0]['token'])
         assert len(issued_token_bytes) == 64
         assert single_channel_data['access_tokens'][0]['description'] == "Owner"
         assert single_channel_data['access_tokens'][0]['can_read'] is True
         assert single_channel_data['access_tokens'][0]['can_write'] is True
 
     @pytest.mark.asyncio
-    async def test_create_new_token_for_channel(self):
+    async def test_create_new_token_for_channel(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: create_new_token_for_channel
@@ -166,7 +170,7 @@ class TestAiohttpRESTAPI:
         }
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_create_new_token_for_channel url: {url}")
-        result: requests.Response = _successful_call(url, HTTP_METHOD, None,
+        result = _successful_call(url, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
         assert result.status_code == 200, result.reason
@@ -184,7 +188,7 @@ class TestAiohttpRESTAPI:
         assert response_body == expected_response_body
 
     @pytest.mark.asyncio
-    def test_list_channels(self):
+    def test_list_channels(self) -> None:
         # handler: list_channels
         URL = 'http://127.0.0.1:55666/api/v1/channel/manage/list'
         HTTP_METHOD = 'get'
@@ -194,7 +198,7 @@ class TestAiohttpRESTAPI:
 
         request_body = None
         self.logger.debug(f"test_list_channels url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
 
@@ -204,7 +208,8 @@ class TestAiohttpRESTAPI:
         assert isinstance(response_body, list)
         assert len(response_body) == 2
         for single_channel_data in response_body:
-            # assert single_channel_data['href'] == f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+            # assert single_channel_data['href'] == \
+            #   f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
             assert single_channel_data['public_read'] is True
             assert single_channel_data['public_write'] is True
             assert single_channel_data['sequenced'] is True
@@ -221,7 +226,7 @@ class TestAiohttpRESTAPI:
             assert single_channel_data['access_tokens'][0]['can_write'] is True
 
     @pytest.mark.asyncio
-    async def test_get_single_channel_details(self):
+    async def test_get_single_channel_details(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: get_single_channel_details
@@ -234,7 +239,7 @@ class TestAiohttpRESTAPI:
         request_body = None
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_get_single_channel_details url: {url}")
-        result: requests.Response = _successful_call(url, HTTP_METHOD, None,
+        result = _successful_call(url, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
 
@@ -242,21 +247,24 @@ class TestAiohttpRESTAPI:
         # self.logger.debug(json.dumps(response_body, indent=4))
 
         single_channel_data = response_body
-        assert single_channel_data['href'] == f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+        assert single_channel_data['href'] == \
+            f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
         assert single_channel_data['public_write'] is True
         assert single_channel_data['sequenced'] is True
-        assert single_channel_data['retention'] == {"min_age_days": 0, "max_age_days": 0, "auto_prune": True}
+        assert single_channel_data['retention'] == {"min_age_days": 0, "max_age_days": 0,
+            "auto_prune": True}
         assert isinstance(single_channel_data['access_tokens'], list)
         assert isinstance(single_channel_data['access_tokens'][0]['id'], int)
-        issued_token_bytes = base64.urlsafe_b64decode(single_channel_data['access_tokens'][0]['token'])
+        issued_token_bytes = \
+            base64.urlsafe_b64decode(single_channel_data['access_tokens'][0]['token'])
         assert len(issued_token_bytes) == 64
         assert single_channel_data['access_tokens'][0]['description'] == "Owner"
         assert single_channel_data['access_tokens'][0]['can_read'] is True
         assert single_channel_data['access_tokens'][0]['can_write'] is True
 
     @pytest.mark.asyncio
-    async def test_update_single_channel_properties(self):
+    async def test_update_single_channel_properties(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: update_single_channel_properties
@@ -273,7 +281,7 @@ class TestAiohttpRESTAPI:
         }
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug(f"test_update_single_channel_properties url: {url}")
-        result: requests.Response = _successful_call(url, HTTP_METHOD, None,
+        result = _successful_call(url, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
 
@@ -282,7 +290,7 @@ class TestAiohttpRESTAPI:
         assert response_body == request_body
 
     @pytest.mark.asyncio
-    async def test_get_token_details(self):
+    async def test_get_token_details(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -304,7 +312,7 @@ class TestAiohttpRESTAPI:
 
         request_body = None
         self.logger.debug(f"test_get_token_details url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
         assert result.status_code == 200, result.reason
@@ -314,7 +322,7 @@ class TestAiohttpRESTAPI:
         assert response_body == expected_response_body
 
     @pytest.mark.asyncio
-    async def test_get_list_of_tokens(self):
+    async def test_get_list_of_tokens(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -346,7 +354,7 @@ class TestAiohttpRESTAPI:
 
         request_body = None
         self.logger.debug(f"test_get_list_of_tokens url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
         assert result.status_code == 200, result.reason
@@ -358,7 +366,7 @@ class TestAiohttpRESTAPI:
     # MESSAGE MANAGEMENT APIS - USE CHANNEL-SPECIFIC BEARER TOKEN NOW
 
     @pytest.mark.asyncio
-    async def test_write_message_no_content_type_should_raise_400(self):
+    async def test_write_message_no_content_type_should_raise_400(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: write_message
@@ -373,13 +381,13 @@ class TestAiohttpRESTAPI:
         headers = {
             "Content-Type": "",
         }
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, headers,
+        result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_BEARER_TOKEN)
         assert result.status_code == 400, result.reason
         assert result.reason is not None
 
     @pytest.mark.asyncio
-    async def test_write_message_read_only_token_should_fail(self):
+    async def test_write_message_read_only_token_should_fail(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -398,12 +406,12 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
         self.logger.debug(f"test_write_message_read_only_token_should_fail url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, headers,
+        result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_READ_ONLY_TOKEN)
 
         assert result.status_code == 401, result.reason
 
-    def _write_message(self, CHANNEL_ID, CHANNEL_BEARER_TOKEN):
+    def _write_message(self, CHANNEL_ID: str, CHANNEL_BEARER_TOKEN: str) -> requests.Response:
         headers = {}
         headers["Content-Type"] = "application/json"
         request_body = {
@@ -417,13 +425,13 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
         self.logger.debug(f"test_write_message url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, headers,
+        result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
         return result
 
     @pytest.mark.asyncio
-    async def test_write_message(self):
+    async def test_write_message(self) -> None:
         """Uses CHANNEL_BEARER_TOKEN to write messages for the CHANNEL_READ_ONLY_TOKEN to read."""
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
@@ -441,19 +449,20 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
         self.logger.debug(f"test_write_message url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, headers,
+        result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_BEARER_TOKEN)
 
         assert result.status_code == 200, result.reason
 
         response_body = result.json()
         assert isinstance(response_body['sequence'], int)
-        assert isinstance(datetime.datetime.fromisoformat(response_body['received']), datetime.datetime)
+        assert isinstance(datetime.datetime.fromisoformat(response_body['received']),
+            datetime.datetime)
         assert response_body['content_type'] == 'application/json'
         assert response_body['payload'] == {'key': 'value'}
 
     @pytest.mark.asyncio
-    async def test_get_messages_head(self):
+    async def test_get_messages_head(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -467,13 +476,13 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD)
 
         self.logger.debug(f"test_get_messages_head url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None, None,
+        result = _successful_call(URL, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.headers['ETag'] == "1"
         assert result.content == b''
 
     @pytest.mark.asyncio
-    async def test_get_messages_unread_should_get_one(self):
+    async def test_get_messages_unread_should_get_one(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -489,18 +498,19 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD)
 
         self.logger.debug(f"test_get_messages_head url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None, None,
+        result = _successful_call(URL, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.headers['ETag'] == "1"
         response_body = result.json()
         assert isinstance(response_body, list)
         assert response_body[0]['sequence'] == 1
-        assert isinstance(datetime.datetime.fromisoformat(response_body[0]['received']), datetime.datetime)
+        assert isinstance(datetime.datetime.fromisoformat(response_body[0]['received']),
+            datetime.datetime)
         assert response_body[0]['content_type'] == 'application/json'
         assert response_body[0]['payload'] == {'key': 'value'}
 
     @pytest.mark.asyncio
-    async def test_mark_message_read_or_unread(self):
+    async def test_mark_message_read_or_unread(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -517,7 +527,7 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD)
 
         body = {"read": True}
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None, body,
+        result = _successful_call(URL, HTTP_METHOD, None, body,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 200, result.reason
 
@@ -525,13 +535,13 @@ class TestAiohttpRESTAPI:
         query_params = "?older=true"
         URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}/{sequence}'\
                   .format(channelid=CHANNEL_ID, sequence=sequence) + query_params
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None, body,
+        result = _successful_call(URL, HTTP_METHOD, None, body,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 404, result.reason
         assert result.reason is not None
 
     @pytest.mark.asyncio
-    async def test_delete_message_read_only_token_should_fail(self):
+    async def test_delete_message_read_only_token_should_fail(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -548,19 +558,19 @@ class TestAiohttpRESTAPI:
 
         sequence = 1
         url = URL.format(channelid=CHANNEL_ID, sequence=sequence)
-        result: requests.Response = _successful_call(url, HTTP_METHOD, None, None,
+        result = _successful_call(url, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 401, result.reason
 
         sequence = 2
         url = URL.format(channelid=CHANNEL_ID, sequence=sequence)
-        result: requests.Response = _successful_call(url, HTTP_METHOD, None, None,
+        result = _successful_call(url, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 401, result.reason
         assert result.reason is not None
 
     @pytest.mark.asyncio
-    async def test_delete_message_should_succeed(self):
+    async def test_delete_message_should_succeed(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         _response = self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
@@ -572,13 +582,13 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD)
 
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None, None,
+        result = _successful_call(URL, HTTP_METHOD, None, None,
             CHANNEL_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
 
         sequence = 2
         url = URL.format(channelid=CHANNEL_ID, sequence=sequence)
-        result: requests.Response = _successful_call(url, HTTP_METHOD, None, None,
+        result = _successful_call(url, HTTP_METHOD, None, None,
             CHANNEL_BEARER_TOKEN)
         assert result.status_code == 404, result.reason
         assert result.reason is not None
@@ -589,11 +599,10 @@ class TestAiohttpRESTAPI:
         count = 0
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.ws_connect(url + f"?token={msg_box_api_token}", timeout=5.0) as ws:
-
+                async with session.ws_connect(url + f"?token={msg_box_api_token}", timeout=5.0) \
+                        as ws:
                     self.logger.info(f'Connected to {url}')
                     async for msg in ws:
-                        msg: aiohttp.WSMessage
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             content = json.loads(msg.data)
                             self.logger.info(f'New message from msg box: {content}')
@@ -614,10 +623,12 @@ class TestAiohttpRESTAPI:
                     raise WebsocketUnauthorizedException()
 
     @pytest.mark.asyncio
-    def test_channels_websocket_bad_auth_should_fail(self):
-        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int, completion_event: asyncio.Event):
+    def test_channels_websocket_bad_auth_should_fail(self) -> None:
+        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int,
+                completion_event: asyncio.Event) -> None:
             try:
-                await self._subscribe_to_msg_box_notifications(url, msg_box_api_token, expected_count, completion_event)
+                await self._subscribe_to_msg_box_notifications(url, msg_box_api_token,
+                    expected_count, completion_event)
             except WebsocketUnauthorizedException:
                 self.logger.debug(f"Websocket unauthorized - bad token")
                 assert True  # Auth should failed
@@ -627,16 +638,19 @@ class TestAiohttpRESTAPI:
         asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
 
     @pytest.mark.asyncio
-    def test_channels_websocket(self):
+    def test_channels_websocket(self) -> None:
         logger = logging.getLogger("websocket-test")
-        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int, completion_event: asyncio.Event):
+        async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int,
+                completion_event: asyncio.Event) -> None:
             try:
-                await self._subscribe_to_msg_box_notifications(url, msg_box_api_token, expected_count, completion_event)
+                await self._subscribe_to_msg_box_notifications(url, msg_box_api_token,
+                    expected_count, completion_event)
             except WebsocketUnauthorizedException:
                 self.logger.debug(f"Auth failed")
                 assert False  # Auth should have passed
 
-        async def push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, expected_msg_count: int):
+        async def push_messages(CHANNEL_ID: str, CHANNEL_BEARER_TOKEN: str,
+                expected_msg_count: int) -> None:
             for i in range(expected_msg_count):
                 headers = {}
                 headers["Content-Type"] = "application/json"
@@ -651,8 +665,9 @@ class TestAiohttpRESTAPI:
                         self.logger.debug(f"push_messages = {await resp.json()}")
                         assert resp.status == 200, resp.reason
 
-        async def main():
-            CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
+        async def main() -> None:
+            CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = \
+                await self._create_new_channel()
             CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
                 await self._create_read_only_token(CHANNEL_ID)
 
@@ -663,18 +678,20 @@ class TestAiohttpRESTAPI:
 
             completion_event = asyncio.Event()
             url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
-            task1 = asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT, completion_event))
+            task1 = asyncio.create_task(wait_on_sub(url, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT,
+                completion_event))
             await asyncio.sleep(3)
-            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, EXPECTED_MSG_COUNT))
+            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
+                EXPECTED_MSG_COUNT))
             await asyncio.gather(task1, task2)
             await completion_event.wait()
 
         asyncio.run(main())
 
     @pytest.mark.asyncio
-    def test_general_purpose_websocket_bad_auth_should_fail(self):
+    def test_general_purpose_websocket_bad_auth_should_fail(self) -> None:
         async def wait_on_sub(url: str, api_token: str,
-                              expected_count: int, completion_event: asyncio.Event):
+                              expected_count: int, completion_event: asyncio.Event) -> None:
             try:
                 await _subscribe_to_general_notifications_peer_channels(url,
                     api_token, expected_count, completion_event)
@@ -687,10 +704,10 @@ class TestAiohttpRESTAPI:
         asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
 
     @pytest.mark.asyncio
-    def test_general_purpose_websocket_peer_channel_notifications(self):
+    def test_general_purpose_websocket_peer_channel_notifications(self) -> None:
         logger = logging.getLogger("websocket-test")
         async def wait_on_sub(url: str, api_token: str, expected_count: int,
-                completion_event: asyncio.Event):
+                completion_event: asyncio.Event) -> None:
             try:
                 await _subscribe_to_general_notifications_peer_channels(
                     url, api_token, expected_count, completion_event)
@@ -698,7 +715,8 @@ class TestAiohttpRESTAPI:
                 self.logger.debug(f"Auth failed")
                 assert False  # Auth should have passed
 
-        async def push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN, expected_msg_count: int):
+        async def push_messages(CHANNEL_ID: str, CHANNEL_BEARER_TOKEN: str,
+                expected_msg_count: int) -> None:
             for i in range(expected_msg_count):
                 headers = {}
                 headers["Content-Type"] = "application/json"
@@ -714,8 +732,9 @@ class TestAiohttpRESTAPI:
                         self.logger.debug(f"push_messages = {await resp.json()}")
                         assert resp.status == 200, resp.reason
 
-        async def main():
-            CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
+        async def main() -> None:
+            CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = \
+                await self._create_new_channel()
             CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
                 await self._create_read_only_token(CHANNEL_ID)
 
@@ -726,8 +745,9 @@ class TestAiohttpRESTAPI:
 
             completion_event = asyncio.Event()
             url = WS_URL_GENERAL
-            task1 = asyncio.create_task(wait_on_sub(url, TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
-                completion_event))
+            task1 = asyncio.create_task(
+                wait_on_sub(url, TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
+                    completion_event))
             await asyncio.sleep(3)
             task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
                 EXPECTED_MSG_COUNT))
@@ -737,7 +757,7 @@ class TestAiohttpRESTAPI:
         asyncio.run(main())
 
     @pytest.mark.asyncio
-    async def test_revoke_selected_token(self):
+    async def test_revoke_selected_token(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -753,12 +773,12 @@ class TestAiohttpRESTAPI:
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         request_body = None
         self.logger.debug(f"test_revoke_selected_token url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, good_bearer_token)
 
         assert result.status_code == web.HTTPNoContent.status_code
 
-    def _revoke_token(self, CHANNEL_ID, CHANNEL_READ_ONLY_TOKEN_ID):
+    def _revoke_token(self, CHANNEL_ID: str, CHANNEL_READ_ONLY_TOKEN_ID: str) -> requests.Response:
         # handler: revoke_selected_token
         URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
             .format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
@@ -767,12 +787,12 @@ class TestAiohttpRESTAPI:
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         request_body = None
         self.logger.debug(f"test_revoke_selected_token url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, good_bearer_token)
         return result
 
     @pytest.mark.asyncio
-    async def test_expired_token_should_fail(self):
+    async def test_expired_token_should_fail(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
             await self._create_read_only_token(CHANNEL_ID)
@@ -789,13 +809,13 @@ class TestAiohttpRESTAPI:
         expired_bearer_token = CHANNEL_READ_ONLY_TOKEN
         request_body = None
         self.logger.debug(f"test_revoke_selected_token url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
+        result = _successful_call(URL, HTTP_METHOD, None,
             request_body, expired_bearer_token)
 
         assert result.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_delete_channel(self):
+    async def test_delete_channel(self) -> None:
         _CHANNEL_ID, _CHANNEL_BEARER_TOKEN, _CHANNEL_BEARER_TOKEN_ID = \
             await self._create_new_channel()
 
@@ -821,7 +841,7 @@ class TestAiohttpRESTAPI:
         for channel_id in channel_ids_for_deletion:
             url = URL_TEMPLATE.format(channelid=channel_id)
             self.logger.debug(f"test_delete_channel url: {url}")
-            result: requests.Response = _successful_call(url, HTTP_METHOD, None,
+            result = _successful_call(url, HTTP_METHOD, None,
                 None, good_bearer_token)
             assert result.status_code == web.HTTPNoContent.status_code
 

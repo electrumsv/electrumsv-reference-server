@@ -43,14 +43,15 @@ from bitcoinx import Bitcoin, Ops, P2PKH_Address, P2PK_Output, P2MultiSig_Output
     PublicKey, Script, SigHash, Tx, TxInput, TxOutput
 import pytest
 
-from esv_reference_server.constants import AccountFlags, ChannelState
-from esv_reference_server.keys import create_regtest_server_keys, ServerKeys
+from esv_reference_server.constants import AccountFlags, ChannelState, \
+    MINIMUM_CHANNEL_PAYMENT_VALUE, MINIMUM_FUNDING_VALUE, SAFE_DUST_VALUE
+from esv_reference_server.keys import create_regtest_server_keys, generate_payment_private_key, \
+    generate_payment_public_key, ServerKeys
 from esv_reference_server.payment_channels import _calculate_transaction_fee, \
-    _sign_contract_transaction_input, BrokenChannelError, generate_payment_private_key, \
-    generate_payment_public_key, InvalidTransactionError, MINIMUM_CHANNEL_PAYMENT_VALUE, \
-    MINIMUM_FUNDING_VALUE, MINIMUM_REFUND_SECONDS, MAXIMUM_REFUND_SECONDS, PaymentChannelError, \
+    _sign_contract_transaction_input, BrokenChannelError, InvalidTransactionError, \
+    MINIMUM_REFUND_SECONDS, MAXIMUM_REFUND_SECONDS, PaymentChannelError, \
     process_contract_close_async, process_contract_update_async, process_funding_script,\
-    process_funding_transaction_async, process_refund_contract_transaction, SAFE_DUST_VALUE
+    process_funding_transaction_async, process_refund_contract_transaction
 
 from esv_reference_server.sqlite_db import AccountMetadata, ChannelRow
 
@@ -189,7 +190,7 @@ def _make_database_rows(*, channel_state: ChannelState,
     ChannelState.CONTRACT_OPEN,
     ChannelState.CLOSED_INVALID_FUNDING_TRANSACTION,
     ChannelState.CLOSED_BROADCASTING_FUNDING_TRANSACTION))
-def test_process_refund_contract_transaction__invalid_state(channel_state) -> None:
+def test_process_refund_contract_transaction__invalid_state(channel_state: ChannelState) -> None:
     loose_data, account_metadata, channel_row = \
         _make_database_rows(channel_state=channel_state)
 
@@ -219,7 +220,8 @@ def test_process_refund_contract_transaction__corrupt_transaction() -> None:
     # Edge case more than one input / two inputs.
     [TxInput(os.urandom(32), 0, Script(), 0xFFFFFFFF),
     TxInput(os.urandom(32), 0, Script(), 0xFFFFFFFF)]))
-def test_process_refund_contract_transaction__incorrect_number_of_inputs(tx_inputs) -> None:
+def test_process_refund_contract_transaction__incorrect_number_of_inputs(tx_inputs: list[TxInput]) \
+        -> None:
     loose_data, account_metadata, channel_row = \
         _make_database_rows(channel_state=ChannelState.PAYMENT_KEY_DISPENSED)
 
@@ -236,7 +238,7 @@ def test_process_refund_contract_transaction__incorrect_number_of_inputs(tx_inpu
     1,
     # Edge case extreme final input.
     0xFFFFFFFF))
-def test_process_refund_contract_transaction__incorrect_input_sequence(sequence) -> None:
+def test_process_refund_contract_transaction__incorrect_input_sequence(sequence: int) -> None:
     loose_data, account_metadata, channel_row = \
         _make_database_rows(channel_state=ChannelState.PAYMENT_KEY_DISPENSED)
 

@@ -202,7 +202,7 @@ async def obtain_server_payment_key_async(account_api_url: str) -> Optional[Tupl
     return payment_key, api_key
 
 
-def create_funding_transaction(server_payment_key) -> Tx:
+def create_funding_transaction(server_payment_key: PublicKey) -> Tx:
     p2ms_output = P2MultiSig_Output([ CLIENT_PAYMENT_PUBLIC_KEY1, server_payment_key ], 2)
 
     imaginary_transaction_hash = bytes.fromhex(

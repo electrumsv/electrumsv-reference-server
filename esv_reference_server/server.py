@@ -51,10 +51,11 @@ requests_logger.setLevel(logging.WARNING)
 
 
 class AiohttpApplication(web.Application):
+    is_alive: bool = False
+    found_swagger: bool = False
 
     def __init__(self) -> None:
         super().__init__()
-        self.is_alive: bool = False
         self.routes: list[Route] = []
         self.API_ROUTE_DEFS: dict[str, EndpointInfo] = {}
 
@@ -407,7 +408,7 @@ if found_swagger:
 
 
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> tuple[Application, str, int]:
+        port: int = SERVER_PORT) -> tuple[AiohttpApplication, str, int]:
     loop = asyncio.get_event_loop()
     app = AiohttpApplication()
     app.cleanup_ctx.append(client_session_ctx)
