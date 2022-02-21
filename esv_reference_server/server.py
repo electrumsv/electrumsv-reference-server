@@ -520,8 +520,6 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
                           handlers_headers.get_headers_by_height), True),
             Route(web.get("/api/v1/headers/{hash}",
                           handlers_headers.get_header), False),
-            Route(web.get("/api/v1/network/peers",
-                          handlers_headers.get_peers), False),
         ])
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":

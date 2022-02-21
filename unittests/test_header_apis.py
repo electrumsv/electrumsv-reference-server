@@ -119,18 +119,6 @@ class TestAiohttpRESTAPI:
         assert isinstance(response, bytes)
         _assert_binary_tip_structure_correct(response)
 
-    def test_get_peers(self) -> None:
-        URL = 'http://127.0.0.1:55666/api/v1/network/peers'
-        HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_peers url: {URL}")
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
-        if result.status_code == 503:
-            pytest.skip(result.reason)
-
-        for peer in result.json():
-            assert isinstance(peer['ip'], str)
-            assert isinstance(peer['port'], int)
-
     async def _subscribe_to_headers_notifications(self, expected_count: int,
             completion_event: asyncio.Event) -> bool:
         count = 0

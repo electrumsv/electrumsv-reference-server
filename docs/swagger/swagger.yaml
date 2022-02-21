@@ -753,21 +753,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Tips"
 
-  /api/v1/network/peers:
-    get:
-      summary: Get bitcoin daemon network peers of the running HeaderSV instance
-      security: []  # no auth required
-      tags:
-        - HeaderSV APIs
-      responses:
-        '200':
-          description: Get bitcoin daemon network peers of the running HeaderSV instance
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Peers"
-
-
   /api/v1/headers/tips/websocket:
     get:
       summary: Headers websocket

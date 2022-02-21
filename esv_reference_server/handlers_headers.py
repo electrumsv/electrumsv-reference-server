@@ -139,21 +139,6 @@ async def get_chain_tips(request: web.Request) -> web.Response:
         return web.HTTPServiceUnavailable()
 
 
-async def get_peers(request: web.Request) -> web.Response:
-    client_session: aiohttp.ClientSession = request.app['client_session']
-    app_state: ApplicationState = request.app['app_state']
-    try:
-        url_to_fetch = f"{app_state.header_sv_url}/api/v1/network/peers"
-        request_headers = {'Accept': 'application/json'}
-        async with client_session.get(url_to_fetch, headers=request_headers) as response:
-            result = await response.json()
-        response_headers = {'User-Agent': 'ESV-Ref-Server'}
-        return web.json_response(result, status=200, reason='OK', headers=response_headers)
-    except aiohttp.ClientConnectorError as e:
-        logger.error(f"HeaderSV service is unavailable on {app_state.header_sv_url}")
-        return web.HTTPServiceUnavailable()
-
-
 class HeadersWebSocket(web.View):
 
     logger = logging.getLogger("headers-websocket")
