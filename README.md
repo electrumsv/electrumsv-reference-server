@@ -1,7 +1,7 @@
 ElectrumSV Reference Server
 ===========================
-Detailed API [documentation](https://electrumsv.github.io/electrumsv-reference-server/) can be
-found [here](https://electrumsv.github.io/electrumsv-reference-server/)
+Detailed API [documentation](https://electrumsv.github.io/electrumsv-reference-server/swagger/) can
+be found [here](https://electrumsv.github.io/electrumsv-reference-server/swagger/)
 
     Licence: The Open BSV License
     Maintainers: Roger Taylor, AustEcon
