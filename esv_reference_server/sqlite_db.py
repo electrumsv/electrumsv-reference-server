@@ -128,7 +128,7 @@ class SQLiteDatabaseBase:
     2) low latency due to caching the connections prior to use
     """
 
-    def __init__(self, storage_path: Path = Path('esv_reference_server.sqlite')):
+    def __init__(self, storage_path: Path) -> None:
         self.logger = logging.getLogger("sqlite-database-base")
         self.storage_path = storage_path
         self.conn = sqlite3.connect(self.storage_path)
@@ -260,7 +260,7 @@ class SQLiteDatabase(SQLiteDatabaseBase):
     2) low latency due to caching the connections prior to use
     """
 
-    def __init__(self, storage_path: Path = Path('esv_reference_server.sqlite')):
+    def __init__(self, storage_path: Path):
         self.logger = logging.getLogger("sqlite-database")
         super().__init__(storage_path)
 

@@ -10,7 +10,6 @@ import sys
 
 import traceback
 import aiohttp
-import bitcoinx
 from aiohttp import ClientConnectorError, web
 from aiohttp.web_exceptions import HTTPClientError
 
@@ -78,9 +77,12 @@ class ElectrumSVClient:
 async def main() -> None:
     app_state = MockApplicationState()
     client = ElectrumSVClient(app_state)
-    REGTEST_VALID_ACCOUNT_TOKEN = "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
-    msg_box_external_id = "Da7_p8OTF7LVPng2ZPjS9w1UOytL9_iRrAb0abAzpITG9QBGhgkGOjVcL7osUf4xQPrMV9FWin_SHrC5KJnkgQ=="
-    msg_box_api_token = "N1FLVGfduRMKZl3X8h_eAqAyKr_RkJFoXqkHahUahP1wEH2A3Zi9xLJV5VxitYomYENo86CQXiCACjNzMJ-CsA=="
+    REGTEST_VALID_ACCOUNT_TOKEN = "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr6"\
+        "8ES5bytZ8F19IS0XbJlq41accQ=="
+    msg_box_external_id = "Da7_p8OTF7LVPng2ZPjS9w1UOytL9_iRrAb0abAzpITG9QBGhgkGOjVcL7osUf4xQPrMV"\
+        "9FWin_SHrC5KJnkgQ=="
+    msg_box_api_token = "N1FLVGfduRMKZl3X8h_eAqAyKr_RkJFoXqkHahUahP1wEH2A3Zi9xLJV5VxitYomYENo86C"\
+        "QXiCACjNzMJ-CsA=="
     url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=msg_box_external_id)
     while True:
         try:
