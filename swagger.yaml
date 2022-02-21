@@ -4,7 +4,7 @@ info:
     This server is designed to expose virtually all of the APIs that ElectrumSV depends on
     under one roof. The full set of APIs are divided into sub-groupings, each containing
     one or more endpoints.
-  version: 1.0.0
+  version: 1.0.1
   title: ElectrumSV Server
   license:
     name: Open BSV License version 4
@@ -779,10 +779,240 @@ paths:
           description: |
             Subscribe to websocket notifications of the new chain tip.
             See below for binary struct format
+            DELETE THIS ENDPOINT
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TipBinary"
+
+
+# Indexer APIs (optional if service runs an indexer)
+
+  /api/v1/restoration/search:
+    post:
+      tags:
+      - "indexer"
+      summary: "Search for usage of these pushdata hashes in the restoration index"
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: "Pushdata hashes to look for usage of"
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestorationRequestJSON"
+          application/octet-stream:
+            schema:
+              $ref: "#/components/schemas/RestorationRequestBinary"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestorationResponseJSON"
+            application/octet-stream:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    format: binary
+                    default: <key> (application/octet-stream bytes)
+                  api-key:
+                    type: string
+                    format: binary
+                    default: <api-key> (application/octet-stream bytes)
+        '400':
+          description: Invalid API key type or empty request body.
+
+  /api/v1/transaction/{txid}:
+    parameters:
+      - name: txid
+        in: path
+        required: true
+        description: The canonically hex encoded transaction hash
+        schema:
+          type: string
+          format: hex
+    get:
+      summary: Get transaction data for a single transaction.
+      security:
+        - BearerAuth: [ ]
+      tags:
+        - indexer
+      responses:
+        '200':
+          description: Get a single transaction.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                default: The raw bytes for the requested transaction.
+            application/json:
+              schema:
+                type: string
+                format: hex
+                description: The hex-encoded transaction byte data.
+        '400':
+          description: The `txid` value was invalid.
+        '404':
+          description: The server does not have or know about the given transaction.
+        '503':
+          description: Indexer services are currently inaccessible.
+
+  /api/v1/merkle-proof/{txid}:
+    get:
+      summary: Get the merkle proof for a single transaction.
+      security:
+        - BearerAuth: [ ]
+      tags:
+        - indexer
+      parameters:
+        - name: txid
+          in: path
+          required: true
+          description: The canonically hex encoded transaction hash
+          schema:
+            type: string
+            format: hex
+        - name: targetType
+          in: query
+          required: false
+          description: The canonically hex encoded transaction hash
+          schema:
+            type: string
+            default: hash
+            enum:
+              - hash
+              - merkleRoot
+              - header
+      responses:
+        '200':
+          description: Get a single merkle proof.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                default: The binary encoded merkle proof as per the TSC standard.
+            application/json:
+              schema:
+                type: string
+                format: TSC JSON-encoded merkle proof
+        '400':
+          description: The `txid` value was invalid.
+        '404':
+          description: The server does not have or know about the given transaction.
+        '503':
+          description: Indexer services are currently inaccessible.
+
+  /api/v1/output-spend:
+    post:
+      tags:
+      - "indexer"
+      summary: "Search for usage of these outputs in the mempool and mined transactions"
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: "The outpoints to look for usage of."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutputSpendRequestJSON"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestorationResponseJSON"
+            application/octet-stream:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    format: binary
+                    default: <key> (application/octet-stream bytes)
+                  api-key:
+                    type: string
+                    format: binary
+                    default: <api-key> (application/octet-stream bytes)
+        '400':
+          description: Invalid API key type or empty request body.
+        '503':
+          description: Indexer services are currently inaccessible.
+
+  /api/v1/output-spend/notifications:
+    post:
+      tags:
+      - "indexer"
+      summary: Register for notifcations about  these outputs in the mempool and mined transactions.
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: "The outpoints to look for usage of."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutputSpendRequestJSON"
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: The binary encoded list of outpoints.
+      responses:
+        '200':
+          description: The account is known to be connected to the account web socket. The response includes the located usages for the given outpoints. And registrations are put in place so that the web socket is notified if there are any new changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestorationResponseJSON"
+            application/octet-stream:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    format: binary
+                    default: <key> (application/octet-stream bytes)
+                  api-key:
+                    type: string
+                    format: binary
+                    default: <api-key> (application/octet-stream bytes)
+        '400':
+          description: Invalid API key type or empty request body.
+        '503':
+          description: Indexer services are currently inaccessible.
+
+  /api/v1/output-spend/notifications:unregister:
+    post:
+      tags:
+      - "indexer"
+      summary: Unregister for notifcations about  these outputs in the mempool and mined transactions.
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: The outpoints to unregister from. If there is one outpoint and it is a null outpoint (zeroed hash and zero index) all registrations for this account are removed.
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: The binary encoded list of outpoints.
+      responses:
+        '200':
+          description: The account is known to be connected to the account web socket. The response includes the located usages for the given outpoints. And registrations are put in place so that the web socket is notified if there are any new changes.
+        '400':
+          description: Invalid API key type, empty request body or unparseable data.
+        '503':
+          description: Indexer services are currently inaccessible.
 
 components:
   securitySchemes:
@@ -959,3 +1189,46 @@ components:
       type: array
       items:
         $ref: "#/components/schemas/Peer"
+    PushdataHashes:
+      type: array
+      items:
+        type: string
+    RestorationRequestJSON:
+      type: object
+      properties:
+        filterKeys:
+          $ref: "#/components/schemas/PushdataHashes"
+    RestorationRequestBinary:
+      # TODO This is not displayed.
+      type: object
+      properties:
+        filterKeys:
+          $ref: "#/components/schemas/PushdataHashes"
+    RestorationResponseJSON:
+      type: object
+      properties:
+        pushDataHashHex:
+          type: string
+        lockingTransactionId:
+          type: string
+        lockingTransactionIndex:
+          type: string
+        unlockingTransactionId:
+          type: string
+        unlockingInputIndex:
+          type: string
+        flags:
+          type: integer
+    OutputSpendRequestJSON:
+      type: array
+      items:
+        type: array
+        items:
+          oneOf:
+            - type: string
+            - type: integer
+        minItems: 2
+        maxItems: 2
+        description: >-
+          The first item in the array MUST be an string representing the canonically hex-encoded transaction id,
+          and the second item MUST be a integer representing the index of the transaction output.
