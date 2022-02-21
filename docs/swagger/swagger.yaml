@@ -791,7 +791,7 @@ paths:
   /api/v1/restoration/search:
     post:
       tags:
-      - "indexer"
+      - Indexer
       summary: "Search for usage of these pushdata hashes in the restoration index"
       security:
         - BearerAuth: [ ]
@@ -841,7 +841,7 @@ paths:
       security:
         - BearerAuth: [ ]
       tags:
-        - indexer
+        - Indexer
       responses:
         '200':
           description: Get a single transaction.
@@ -869,7 +869,7 @@ paths:
       security:
         - BearerAuth: [ ]
       tags:
-        - indexer
+        - Indexer
       parameters:
         - name: txid
           in: path
@@ -912,7 +912,7 @@ paths:
   /api/v1/output-spend:
     post:
       tags:
-      - "indexer"
+      - Indexer
       summary: "Search for usage of these outputs in the mempool and mined transactions"
       security:
         - BearerAuth: [ ]
@@ -950,7 +950,7 @@ paths:
   /api/v1/output-spend/notifications:
     post:
       tags:
-      - "indexer"
+      - Indexer
       summary: Register for notifcations about  these outputs in the mempool and mined transactions.
       security:
         - BearerAuth: [ ]
@@ -993,7 +993,7 @@ paths:
   /api/v1/output-spend/notifications:unregister:
     post:
       tags:
-      - "indexer"
+      - Indexer
       summary: Unregister for notifcations about  these outputs in the mempool and mined transactions.
       security:
         - BearerAuth: [ ]
