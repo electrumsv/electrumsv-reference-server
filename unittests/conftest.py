@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 import struct
 import sys
 import threading
@@ -16,6 +17,7 @@ from bitcoinx import PublicKey, PrivateKey
 import pytest
 import requests
 
+from esv_reference_server.constants import DEFAULT_DATABASE_NAME
 from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.server import AiohttpApplication
 from esv_reference_server.sqlite_db import SQLiteDatabase
@@ -209,18 +211,22 @@ def _is_server_running(url: str) -> bool:
 
 @pytest.fixture(scope="session", autouse=True)
 def run_server() -> Generator[AiohttpApplication, None, None]:
+    data_path = MODULE_DIR / "localdata"
+    if data_path.exists():
+        shutil.rmtree(data_path)
+    data_path.mkdir()
+
     os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
     os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
     os.environ['SKIP_DOTENV_FILE'] = '1'
     os.environ['REFERENCE_SERVER_RESET'] = '0'
-    os.environ['DATASTORE_LOCATION'] = str(MODULE_DIR.joinpath("test_sqlite.sqlite"))
+    os.environ['REFERENCE_SERVER_DATA_PATH'] = str(data_path)
     os.environ['NOTIFICATION_TEXT_NEW_MESSAGE'] = 'New message arrived'
     os.environ['MAX_MESSAGE_CONTENT_LENGTH'] = '65536'
     os.environ['CHUNKED_BUFFER_SIZE'] = '1024'
 
     # Reset db before use
-    datastore_location = Path(os.environ['DATASTORE_LOCATION'])
-    sqlite_db: SQLiteDatabase = SQLiteDatabase(datastore_location)
+    sqlite_db: SQLiteDatabase = SQLiteDatabase(data_path / DEFAULT_DATABASE_NAME)
     sqlite_db.drop_tables()
 
     app, host, port = get_app(TEST_HOST, TEST_PORT)

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import requests
 
+from esv_reference_server.constants import DEFAULT_DATABASE_NAME
 from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.sqlite_db import SQLiteDatabase
 from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
@@ -819,7 +820,9 @@ class TestAiohttpRESTAPI:
         _CHANNEL_ID, _CHANNEL_BEARER_TOKEN, _CHANNEL_BEARER_TOKEN_ID = \
             await self._create_new_channel()
 
-        datastore_location = Path(os.environ['DATASTORE_LOCATION'])
+        data_path = Path(os.environ['REFERENCE_SERVER_DATA_PATH'])
+        datastore_location = data_path / DEFAULT_DATABASE_NAME
+
         sqlite_db: SQLiteDatabase = SQLiteDatabase(datastore_location)
         sql = """SELECT * FROM msg_box"""
         rows = sqlite_db.execute(sql)

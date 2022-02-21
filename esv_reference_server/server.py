@@ -442,7 +442,8 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app['_account_websocket_state'] = app_state._account_websocket_state
 
     if found_swagger:
-        swagger = SwaggerFile(app, spec_file=str(MODULE_DIR.parent.joinpath("swagger.yaml")),
+        swagger = SwaggerFile(app, spec_file=
+            str(MODULE_DIR.parent.joinpath("docs", "swagger", "swagger.yaml")),
             swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
         swagger.register_media_type_handler("application/json", application_json)
         swagger.register_media_type_handler("application/octet-stream", application_octet_stream)
@@ -558,10 +559,3 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
             BASE_URL + route_def.path, auth_required)
 
     return app, host, port
-
-
-if __name__ == "__main__":
-    DEFAULT_DATASTORE_LOCATION = MODULE_DIR.parent / 'esv_reference_server.sqlite'
-    datastore_location = Path(os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION))
-    app, host, port = get_aiohttp_app(Network.REGTEST, datastore_location)
-    web.run_app(app, host=SERVER_HOST, port=SERVER_PORT)

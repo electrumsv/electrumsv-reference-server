@@ -10,32 +10,38 @@ from typing import Optional
 from aiohttp import web
 
 from esv_reference_server.server import get_aiohttp_app, AiohttpApplication
-from esv_reference_server.constants import SERVER_HOST, SERVER_PORT, STRING_TO_NETWORK_ENUM_MAP
+from esv_reference_server.constants import DEFAULT_DATABASE_NAME, SERVER_HOST, SERVER_PORT, \
+    STRING_TO_NETWORK_ENUM_MAP
 
 if typing.TYPE_CHECKING:
     from .esv_reference_server.server import ApplicationState
 
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-FULL_LOG_PATH = MODULE_DIR / 'logs' / 'esv_reference_server.log'
+LOG_PATH = Path('logs') / 'esv_reference_server.log'
 logger = logging.getLogger("server")
 
 
-def create_log_file_if_not_exist() -> None:
-    if not Path(FULL_LOG_PATH).exists():
-        os.makedirs(os.path.dirname(FULL_LOG_PATH), exist_ok=True)
-        with open(FULL_LOG_PATH, 'w') as f:
+def create_log_file_if_not_exist(data_path: Path) -> Path:
+    full_log_path = data_path / LOG_PATH
+    if not full_log_path.exists():
+        full_log_path.parent.mkdir(exist_ok=True)
+        with open(full_log_path, 'w') as f:
             f.write('')
+    return full_log_path
 
 
-def setup_logging() -> None:
-    create_log_file_if_not_exist()
+def setup_logging(data_path: Path) -> None:
+    full_log_path = create_log_file_if_not_exist(data_path)
     logging.basicConfig(format='%(asctime)s %(levelname)-8s %(name)-24s %(message)s',
         level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
-    file_handler = RotatingFileHandler(FULL_LOG_PATH, mode='w', backupCount=1, encoding='utf-8')
+    file_handler = RotatingFileHandler(full_log_path, mode='w', backupCount=1, encoding='utf-8')
     formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(name)-24s %(message)s')
     file_handler.setFormatter(formatter)
     logging.root.addHandler(file_handler)
+
+    logger = logging.getLogger("logs")
+    logger.debug("File logging path=%s", full_log_path)
 
 
 
@@ -54,7 +60,7 @@ class AiohttpServer:
         self.logger = logging.getLogger("aiohttp-rest-api")
 
     async def on_startup(self, app: web.Application) -> None:
-        self.logger.debug("File logging path=%s", FULL_LOG_PATH)
+        pass
 
     async def on_shutdown(self, app: web.Application) -> None:
         self.logger.debug("Stopping server...")
@@ -98,19 +104,23 @@ def load_dotenv(dotenv_path: Path) -> None:
 
 def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
         -> tuple[AiohttpApplication, str, int]:
-    setup_logging()
-    dotenv_path = MODULE_DIR.joinpath('.env')
-
     # Used for unit testing to override usual configuration
     if not os.getenv("SKIP_DOTENV_FILE") == '1':
+        dotenv_path = MODULE_DIR.joinpath('.env')
         load_dotenv(dotenv_path)
+
+    DEFAULT_DATA_PATH = MODULE_DIR / "localdata"
+    data_path = Path(os.getenv('REFERENCE_SERVER_DATA_PATH', DEFAULT_DATA_PATH))
+    if not data_path.exists():
+        data_path.mkdir(parents=True)
+
+    setup_logging(data_path)
 
     human_readable_network = os.getenv('NETWORK', 'regtest')
     network_enum = STRING_TO_NETWORK_ENUM_MAP[human_readable_network]
     logger.debug(f"Running in {human_readable_network} mode")
 
-    DEFAULT_DATASTORE_LOCATION = MODULE_DIR / 'esv_reference_server.sqlite'
-    datastore_location = Path(os.getenv('DATASTORE_LOCATION', DEFAULT_DATASTORE_LOCATION))
+    datastore_location = data_path / DEFAULT_DATABASE_NAME
     logger.debug("Datastore location %s", datastore_location)
 
     app = get_aiohttp_app(network_enum, datastore_location, host, port)
