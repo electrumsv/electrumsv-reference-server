@@ -22,7 +22,7 @@ from .. import errors
 from ..errors import Error
 from .models import MsgBox, Message
 from .repositories import MsgBoxSQLiteRepository
-from ..types import AccountMessage, ChannelNotification, EndpointInfo, MsgBoxWSClient, \
+from ..types import AccountMessage, ChannelNotification, MsgBoxWSClient, \
     PushNotification
 from ..utils import _try_read_bearer_token, _auth_ok, _try_read_bearer_token_from_query
 from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
@@ -30,7 +30,6 @@ from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MessageViewModelGetBinary
 
 if TYPE_CHECKING:
-    from electrumsv_database.sqlite import DatabaseContext
     from ..server import ApplicationState
 
 
@@ -59,11 +58,10 @@ def _auth_for_channel_token(request: web.Request,
 
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
-    API_ROUTE_DEFS: dict[str, EndpointInfo] = request.app.API_ROUTE_DEFS  # type: ignore
-    get_messages_url = API_ROUTE_DEFS['get_messages'].url.format(
-        channelid=msg_box.external_id)
-    get_messages_href = get_messages_url
-    return MsgBoxViewModelGet.from_msg_box(msg_box, href=get_messages_href)
+    app_state: ApplicationState = request.app['app_state']
+    # NOTE(hardcoded-url) Update this if updating the server URL.
+    href = f"http://{app_state.host}:{app_state.port}/api/v1/channel/{msg_box.external_id}"
+    return MsgBoxViewModelGet.from_msg_box(msg_box, href=href)
 
 
 # ----- CHANNEL MANAGEMENT APIs ----- #

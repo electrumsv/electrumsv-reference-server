@@ -73,7 +73,7 @@ async def maintain_indexer_connection(app_state: ApplicationState) -> None:
     websocket_url = f"{app_state.indexer_url}/ws"
 
     logger.debug("Entering maintain_indexer_connection")
-    while app_state.app.is_alive:
+    while app_state.is_alive:
         await manage_indexer_websocket(app_state, client_session, websocket_url)
         logger.debug("Not connected to indexer; waiting for 10 seconds to retry")
         await asyncio.sleep(10)

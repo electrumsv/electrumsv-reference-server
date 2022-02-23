@@ -19,7 +19,7 @@ import time
 from typing import Any, cast, Generator, Optional
 
 import aiohttp
-from aiohttp import WSServerHandshakeError
+from aiohttp import web, WSServerHandshakeError
 from bitcoinx import PublicKey, PrivateKey
 from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
 import pytest
@@ -27,7 +27,6 @@ import requests
 
 from esv_reference_server.constants import DEFAULT_DATABASE_NAME
 from esv_reference_server.errors import WebsocketUnauthorizedException
-from esv_reference_server.server import AiohttpApplication
 from esv_reference_server.sqlite_db import delete_all_tables
 
 
@@ -59,10 +58,10 @@ CHANNEL_READ_ONLY_TOKEN: str = ""
 CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 
 
-app_reference: Optional[AiohttpApplication] = None
+app_reference: Optional[web.Application] = None
 
 
-async def main(app: AiohttpApplication, host: str, port: int) -> None:
+async def main(app: web.Application, host: str, port: int) -> None:
     server = AiohttpServer(app, host, port)
     try:
         await server.start()
@@ -70,7 +69,7 @@ async def main(app: AiohttpApplication, host: str, port: int) -> None:
         await server.stop()
 
 
-def electrumsv_reference_server_thread(app: AiohttpApplication, host: str = TEST_HOST,
+def electrumsv_reference_server_thread(app: web.Application, host: str = TEST_HOST,
         port: int = TEST_PORT) -> None:
     """Launches the ESV-Reference-Server to run in the background but with a test database"""
     try:
@@ -222,7 +221,7 @@ def _is_server_running(url: str) -> bool:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def run_server() -> Generator[AiohttpApplication, None, None]:
+def run_server() -> Generator[web.Application, None, None]:
     global app_reference
     data_path = MODULE_DIR / "localdata"
     if data_path.exists():

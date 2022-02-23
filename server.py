@@ -9,7 +9,7 @@ from typing import Optional
 
 from aiohttp import web
 
-from esv_reference_server.server import get_aiohttp_app, AiohttpApplication
+from esv_reference_server.server import get_aiohttp_app
 from esv_reference_server.constants import DEFAULT_DATABASE_NAME, SERVER_HOST, SERVER_PORT, \
     STRING_TO_NETWORK_ENUM_MAP
 
@@ -47,8 +47,8 @@ def setup_logging(data_path: Path) -> None:
 
 class AiohttpServer:
 
-    def __init__(self, app: AiohttpApplication, host: str = SERVER_HOST,
-            port: int = SERVER_PORT) -> None:
+    def __init__(self, app: web.Application, host: str = SERVER_HOST, port: int = SERVER_PORT) \
+            -> None:
         self.runner: Optional[web.AppRunner] = None
         self.app = app
         self.app_state: 'ApplicationState' = app['app_state']
@@ -65,21 +65,18 @@ class AiohttpServer:
     async def on_shutdown(self, app: web.Application) -> None:
         self.logger.debug("Stopping server...")
         await self.app_state.close_aiohttp_session()
-        self.app.is_alive = False
+        self.app_state.is_alive = False
         self.logger.info("Stopped server")
 
     async def start(self) -> None:
-        self.app.is_alive = True
+        self.app_state.is_alive = True
         self.logger.info("Started server on http://%s:%s", self.host, self.port)
-        if self.app.found_swagger:
-            self.logger.debug("Swagger docs hosted at: http://%s:%s/api/v1/docs", self.host,
-                self.port)
         self.runner = web.AppRunner(self.app, access_log=None)
         await self.runner.setup()
         site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
         await site.start()
         self.app_state.start_tasks()
-        while self.app.is_alive:
+        while self.app_state.is_alive:
             await asyncio.sleep(0.5)
 
     async def stop(self) -> None:
@@ -103,7 +100,7 @@ def load_dotenv(dotenv_path: Path) -> None:
 
 
 def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
-        -> tuple[AiohttpApplication, str, int]:
+        -> tuple[web.Application, str, int]:
     # Used for unit testing to override usual configuration
     if not os.getenv("SKIP_DOTENV_FILE") == '1':
         dotenv_path = MODULE_DIR.joinpath('.env')

@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import struct
 import threading
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 
 import aiohttp
 from aiohttp import web
@@ -26,17 +26,10 @@ from . import msg_box
 from .msg_box.controller import MsgBoxWebSocket
 from .msg_box.repositories import MsgBoxSQLiteRepository
 from . import sqlite_db
-from .types import AccountMessage, AccountWebsocketState, EndpointInfo, GeneralNotification, \
-    HeadersWSClient, MsgBoxWSClient, Outpoint, PushNotification, Route
+from .types import AccountMessage, AccountWebsocketState, GeneralNotification, \
+    HeadersWSClient, MsgBoxWSClient, Outpoint, PushNotification
 from .utils import pack_account_message_bytes
 from .websock import GeneralWebSocket
-
-try:
-    from aiohttp_swagger3 import SwaggerUiSettings, SwaggerFile, ValidatorError
-except ModuleNotFoundError:
-    found_swagger = False
-else:
-    found_swagger = True
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,24 +42,17 @@ requests_logger = logging.getLogger("urllib3")
 requests_logger.setLevel(logging.WARNING)
 
 
-class AiohttpApplication(web.Application):
-    is_alive: bool = False
-    found_swagger: bool = False
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.routes: list[Route] = []
-        self.API_ROUTE_DEFS: dict[str, EndpointInfo] = {}
-
-
 class ApplicationState(object):
     server_keys: ServerKeys
+    is_alive: bool = False
 
-    def __init__(self, app: AiohttpApplication, loop: asyncio.AbstractEventLoop,
-            network: Network, datastore_location: Path) -> None:
+    def __init__(self, app: web.Application, loop: asyncio.AbstractEventLoop,
+            network: Network, datastore_location: Path, host: str, port: int) -> None:
         self.logger = logging.getLogger('app_state')
         self.app = app
         self.loop = loop
+        self.host = host
+        self.port = port
 
         self._account_websocket_state: dict[str, AccountWebsocketState] = {}
         self._account_websocket_id_by_account_id: dict[int, str] = {}  # account_id: ws_id
@@ -142,7 +128,7 @@ class ApplicationState(object):
             session = await self._get_aiohttp_session()
             current_best_hash = ""
 
-            while self.app.is_alive:
+            while self.is_alive:
                 try:
                     url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
@@ -247,7 +233,7 @@ class ApplicationState(object):
             notification: PushNotification
             msg_box_api_token_id: int
             ws_client: MsgBoxWSClient
-            while self.app.is_alive:
+            while self.is_alive:
                 try:
                     msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
                     self.logger.debug(f"Got peer channel notification for channel_id: "
@@ -330,7 +316,7 @@ class ApplicationState(object):
         """
         Serialise and send outgoing account-related notifications.
         """
-        while self.app.is_alive:
+        while self.is_alive:
             account_id, message_kind, payload = await self.account_message_queue.get()
             self.logger.debug("Got account notification, account_id=%d", account_id)
 
@@ -382,40 +368,12 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
     await app['client_session'].close()
 
 
-if found_swagger:
-    # Custom media handlers
-    async def application_json(request: web.Request) -> tuple[dict[Any, Any], bool]:
-        try:
-            return await request.json(), False
-        except ValueError as e:
-            raise ValidatorError(str(e))
-
-
-    async def application_octet_stream(request: web.Request) -> tuple[bytes, bool]:
-        try:
-            return await request.read(), True
-        except ValueError as e:
-            raise ValidatorError(str(e))
-
-
-    async def multipart_mixed(request: web.Request) \
-            -> tuple[list[Optional[bytes]], bool]:
-        try:
-            reader = aiohttp.MultipartReader(request.headers, content=request.content)
-            values = []
-            async for part in reader:
-                values.append(await part.next())
-            return values, True
-        except ValueError as e:
-            raise ValidatorError(str(e))
-
-
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> tuple[AiohttpApplication, str, int]:
+        port: int = SERVER_PORT) -> tuple[web.Application, str, int]:
     loop = asyncio.get_event_loop()
-    app = AiohttpApplication()
+    app = web.Application()
     app.cleanup_ctx.append(client_session_ctx)
-    app_state = ApplicationState(app, loop, network, datastore_location)
+    app_state = ApplicationState(app, loop, network, datastore_location, host, port)
 
     if network == network.REGTEST:
         # TODO(temporary-prototype-choice) Allow regtest key override or fallback to these?
@@ -446,127 +404,80 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
     app['_account_websocket_state'] = app_state._account_websocket_state
 
-    if found_swagger:
-        swagger = SwaggerFile(app, spec_file=
-            str(MODULE_DIR.parent.joinpath("docs", "swagger", "swagger.yaml")),
-            swagger_ui_settings=SwaggerUiSettings(path="/api/v1/docs"))
-        swagger.register_media_type_handler("application/json", application_json)
-        swagger.register_media_type_handler("application/octet-stream", application_octet_stream)
-        swagger.register_media_type_handler("multipart/mixed", multipart_mixed)
-
     # Non-optional APIs
-    # cache app.routes to assist with keeping unit tests up-to-date
-    # 'auth_required' information is only used by unit-testing at the moment to assert that auth
-    # checks are being done
-    app.routes = [
-        Route(web.get("/",
-                      handlers.ping), False),
-        Route(web.get("/api/v1/endpoints",
-                      handlers.get_endpoints_data), False),
+    app.add_routes([
+        web.get("/", handlers.ping),
+        web.get("/api/v1/endpoints", handlers.get_endpoints_data),
 
         # Payment Channel Account Management
-        Route(web.get("/api/v1/account",
-                      handlers.get_account), True),
-        Route(web.post("/api/v1/account/key",
-                       handlers.post_account_key), True),
-        Route(web.post("/api/v1/account/channel",
-                       handlers.post_account_channel), True),
-        Route(web.put("/api/v1/account/channel",
-                      handlers.put_account_channel_update), True),
-        Route(web.delete("/api/v1/account/channel",
-                         handlers.delete_account_channel), True),
-        Route(web.post("/api/v1/account/funding",
-                       handlers.post_account_funding), True),
+        web.get("/api/v1/account", handlers.get_account),
+        web.post("/api/v1/account/key", handlers.post_account_key),
+        web.post("/api/v1/account/channel", handlers.post_account_channel),
+        web.put("/api/v1/account/channel", handlers.put_account_channel_update),
+        web.delete("/api/v1/account/channel", handlers.delete_account_channel),
+        web.post("/api/v1/account/funding", handlers.post_account_funding),
 
         # Message Box Management (i.e. Custom Peer Channels implementation)
-        Route(web.get("/api/v1/channel/manage/list",
-                      msg_box.controller.list_channels, allow_head=False), True),
-        Route(web.get("/api/v1/channel/manage/{channelid}",
-                      msg_box.controller.get_single_channel_details), True),
-        Route(web.post("/api/v1/channel/manage/{channelid}",
-                       msg_box.controller.update_single_channel_properties), True),
-        Route(web.delete("/api/v1/channel/manage/{channelid}",
-                         msg_box.controller.delete_channel), True),
-        Route(web.post("/api/v1/channel/manage",
-                       msg_box.controller.create_new_channel), True),
-        Route(web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
-                      msg_box.controller.get_token_details), True),
-        Route(web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
-                         msg_box.controller.revoke_selected_token), True),
-        Route(web.get("/api/v1/channel/manage/{channelid}/api-token",
-                      msg_box.controller.get_list_of_tokens), True),
-        Route(web.post("/api/v1/channel/manage/{channelid}/api-token",
-                       msg_box.controller.create_new_token_for_channel), True),
+        web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels, allow_head=False),
+        web.get("/api/v1/channel/manage/{channelid}",
+            msg_box.controller.get_single_channel_details),
+        web.post("/api/v1/channel/manage/{channelid}",
+            msg_box.controller.update_single_channel_properties),
+        web.delete("/api/v1/channel/manage/{channelid}", msg_box.controller.delete_channel),
+        web.post("/api/v1/channel/manage", msg_box.controller.create_new_channel),
+        web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
+            msg_box.controller.get_token_details),
+        web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
+            msg_box.controller.revoke_selected_token),
+        web.get("/api/v1/channel/manage/{channelid}/api-token",
+            msg_box.controller.get_list_of_tokens),
+        web.post("/api/v1/channel/manage/{channelid}/api-token",
+            msg_box.controller.create_new_token_for_channel),
 
         # Message Box Push / Pull API
-        Route(web.post("/api/v1/channel/{channelid}",
-                       msg_box.controller.write_message), True),
+        web.post("/api/v1/channel/{channelid}", msg_box.controller.write_message),
         # web.head is added automatically by web.get in aiohttp
-        Route(web.get("/api/v1/channel/{channelid}",
-                      msg_box.controller.get_messages), True),
-        Route(web.post("/api/v1/channel/{channelid}/{sequence}",
-                       msg_box.controller.mark_message_read_or_unread), True),
-        Route(web.delete("/api/v1/channel/{channelid}/{sequence}",
-                         msg_box.controller.delete_message), True),
+        # NOTE(hardcoded-url) Update this if updating the server URL.
+        web.get("/api/v1/channel/{channelid}", msg_box.controller.get_messages),
+        web.post("/api/v1/channel/{channelid}/{sequence}",
+            msg_box.controller.mark_message_read_or_unread),
+        web.delete("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.delete_message),
 
         # Message Box Websocket API
-        Route(web.view("/api/v1/channel/{channelid}/notify",
-                       MsgBoxWebSocket), True),
+        web.view("/api/v1/channel/{channelid}/notify", MsgBoxWebSocket),
 
         # General-Purpose consolidated Websocket - Requires master bearer token
-        Route(web.view("/api/v1/web-socket", GeneralWebSocket), True)
-    ]
+        web.view("/api/v1/web-socket", GeneralWebSocket),
+    ])
     if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
-        app.routes.extend([
-            Route(web.view("/api/v1/headers/tips/websocket",
-                           handlers_headers.HeadersWebSocket), False),
-            Route(web.get("/api/v1/headers/tips",
-                          handlers_headers.get_chain_tips), False),
-            Route(web.get("/api/v1/headers/by-height",
-                          handlers_headers.get_headers_by_height), True),
-            Route(web.get("/api/v1/headers/{hash}",
-                          handlers_headers.get_header), False),
+        app.add_routes([
+            web.view("/api/v1/headers/tips/websocket", handlers_headers.HeadersWebSocket),
+            web.get("/api/v1/headers/tips", handlers_headers.get_chain_tips),
+            web.get("/api/v1/headers/by-height", handlers_headers.get_headers_by_height),
+            web.get("/api/v1/headers/{hash}", handlers_headers.get_header),
         ])
 
     if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
         pass  # TBD
 
     if os.getenv("EXPOSE_INDEXER_APIS") == "1":
-        app.routes.extend([
-            Route(web.post("/api/v1/restoration/search",
-                handlers_indexer.indexer_post_restoration_search), False),
-            Route(web.get("/api/v1/transaction/{txid}",
-                handlers_indexer.indexer_get_transaction), False),
-            Route(web.get("/api/v1/merkle-proof/{txid}",
-                handlers_indexer.indexer_get_merkle_proof), False),
-            Route(web.post("/api/v1/output-spend",
-                handlers_indexer.indexer_post_output_spends), False),
-            Route(web.post("/api/v1/output-spend/notifications",
-                handlers_indexer.indexer_post_output_spend_notifications), False),
-            Route(web.get("/api/v1/transaction/filter",
-                handlers_indexer.indexer_get_transaction_filter), False),
-            Route(web.post("/api/v1/transaction/filter",
-                handlers_indexer.indexer_post_transaction_filter), False),
-            Route(web.post("/api/v1/transaction/filter:delete",
-                handlers_indexer.indexer_post_transaction_filter_delete), False),
+        app.add_routes([
+            web.post("/api/v1/restoration/search",
+                handlers_indexer.indexer_post_restoration_search),
+            web.get("/api/v1/transaction/{txid}",
+                handlers_indexer.indexer_get_transaction),
+            web.get("/api/v1/merkle-proof/{txid}",
+                handlers_indexer.indexer_get_merkle_proof),
+            web.post("/api/v1/output-spend",
+                handlers_indexer.indexer_post_output_spends),
+            web.post("/api/v1/output-spend/notifications",
+                handlers_indexer.indexer_post_output_spend_notifications),
+            web.get("/api/v1/transaction/filter",
+                handlers_indexer.indexer_get_transaction_filter),
+            web.post("/api/v1/transaction/filter",
+                handlers_indexer.indexer_post_transaction_filter),
+            web.post("/api/v1/transaction/filter:delete",
+                handlers_indexer.indexer_post_transaction_filter_delete),
         ])
-
-    if found_swagger:
-        for route_def, auth_required in app.routes:
-            swagger.add_routes([route_def])
-    else:
-        app.add_routes([ v[0] for v in app.routes ])
-
-    app.found_swagger = found_swagger
-
-    BASE_URL = f"http://{host}:{port}"
-    app.host = host
-    app.port = port
-    app.API_ROUTE_DEFS = {}
-    for route in app.routes:
-        route_def = route.aiohttp_route_def
-        auth_required = route.auth_required  # Bearer Token
-        app.API_ROUTE_DEFS[route_def.handler.__name__] = EndpointInfo(route_def.method,
-            BASE_URL + route_def.path, auth_required)
 
     return app, host, port

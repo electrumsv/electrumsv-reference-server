@@ -348,15 +348,14 @@ class MsgBoxSQLiteRepository:
         return None
 
     def get_api_token_by_id(self, token_id: int) -> Optional[APITokenViewModelGet]:
-        sql = "SELECT * FROM msg_box_api_token " \
+        sql = "SELECT id, token, description, canread, canwrite FROM msg_box_api_token " \
               "WHERE id = @token_id and (validto IS NULL OR validto >= @validto);"
         params = (token_id, datetime.utcnow())
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[APITokenViewModelGet]:
             rows = db.execute(sql, params).fetchall()
             if len(rows) != 0:
-                id, account_id, msg_box_id, token, \
-                    description, canread, canwrite, validfrom, validto = rows[0]
+                id, token, description, canread, canwrite = rows[0]
                 return APITokenViewModelGet(id=id, token=token, description=description,
                     can_read=bool(canread), can_write=bool(canwrite))
             return None
@@ -364,8 +363,9 @@ class MsgBoxSQLiteRepository:
 
     # Todo - Add an LRU cache for this request
     def get_api_token(self, token: str) -> Optional[MsgBoxAPIToken]:
-        sql = "SELECT * FROM msg_box_api_token " \
-              "WHERE token = @token and (validto IS NULL OR validto >= @validto);"
+        sql = "SELECT id, account_id, msg_box_id, token, description, canread, canwrite, " \
+                  "validfrom, validto FROM msg_box_api_token " \
+              "WHERE token = @token and (validto IS NULL OR validto >= @validto)"
         params = (token, datetime.utcnow())
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[MsgBoxAPIToken]:
