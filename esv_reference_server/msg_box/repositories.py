@@ -478,7 +478,8 @@ class MsgBoxSQLiteRepository:
                 message_view_model_get = view_models.MessageViewModelGet(sequence=seq,
                     received=datetime.fromisoformat(receivedts),
                     content_type=contenttype, payload=payload)
-                self.logger.debug(f"Wrote message sequence: {seq} for msg_box_id: {msg_box_id}")
+                self.logger.debug("Wrote message sequence: %s for msg_box_id: %s",
+                    seq, msg_box_id)
             else:
                 raise Error(reason="Failed to insert message", status=500)
 

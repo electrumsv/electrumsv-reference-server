@@ -45,7 +45,7 @@ class TestAiohttpRESTAPI:
         query_params = '?height=0'
         URL = 'http://127.0.0.1:55666/api/v1/headers/by-height' + query_params
         HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_headers_by_height url: {URL}")
+        self.logger.debug("test_get_headers_by_height url: %s", URL)
         result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
             good_bearer_token=TEST_MASTER_BEARER_TOKEN)
         if result.status_code == 503:
@@ -67,7 +67,7 @@ class TestAiohttpRESTAPI:
         }
         URL = 'http://127.0.0.1:55666/api/v1/headers/{hash}'.format(hash=REGTEST_GENESIS_BLOCK_HASH)
         HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_header url: {URL}")
+        self.logger.debug("test_get_header url: %s", URL)
         result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
@@ -83,7 +83,7 @@ class TestAiohttpRESTAPI:
 
         URL = 'http://127.0.0.1:55666/api/v1/headers/{hash}'.format(hash=REGTEST_GENESIS_BLOCK_HASH)
         HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_header url: {URL}")
+        self.logger.debug("test_get_header url: %s", URL)
         request_headers = {'Accept': 'application/octet-stream'}
         result: requests.Response = _successful_call(URL, HTTP_METHOD, request_headers)
         if result.status_code == 503:
@@ -94,7 +94,7 @@ class TestAiohttpRESTAPI:
         query_params = '?longest_chain=1'
         URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
         HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_chain_tips url: {URL}")
+        self.logger.debug("test_get_chain_tips url: %s", URL)
         result: requests.Response = _successful_call(URL,
             HTTP_METHOD, None)
         if result.status_code == 503:
@@ -108,7 +108,7 @@ class TestAiohttpRESTAPI:
         query_params = '?longest_chain=1'
         URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
         HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_chain_tips url: {URL}")
+        self.logger.debug("test_get_chain_tips url: %s", URL)
         request_headers = {'Accept': 'application/octet-stream'}
         result: requests.Response = _successful_call(URL,
             HTTP_METHOD, request_headers)
@@ -125,11 +125,11 @@ class TestAiohttpRESTAPI:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(WS_URL_HEADERS, timeout=5.0) as ws:
-                    self.logger.info(f'Connected to {WS_URL_HEADERS}')
+                    self.logger.info('Connected to %s', WS_URL_HEADERS)
 
                     async for msg in ws:
                         content = msg.data
-                        self.logger.info(f'New header notification: {content}')
+                        self.logger.info('New header notification: %s', content)
 
                         result = _assert_tip_notification_structure(content)
                         if not result:
@@ -137,7 +137,7 @@ class TestAiohttpRESTAPI:
 
                         count += 1
                         if count == expected_count:
-                            self.logger.info(f"Received {expected_count} headers successfully")
+                            self.logger.info("Received %d headers successfully", expected_count)
                             completion_event.set()
                             return result
                         if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -154,7 +154,7 @@ class TestAiohttpRESTAPI:
         query_params = '?longest_chain=1'
         URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
         HTTP_METHOD = 'get'
-        self.logger.debug(f"test_get_chain_tips url: {URL}")
+        self.logger.debug("test_get_chain_tips url: %s", URL)
         result: requests.Response = _successful_call(URL,
             HTTP_METHOD, None)
         if result.status_code == 503:
@@ -165,7 +165,7 @@ class TestAiohttpRESTAPI:
                 await self._subscribe_to_headers_notifications(expected_count, completion_event)
             except WSServerHandshakeError as e:
                 if e.status == 401:
-                    self.logger.debug(f"Unauthorized - Bad Bearer Token")
+                    self.logger.debug("Unauthorized - Bad Bearer Token")
                     assert False  # i.e. auth should have passed
 
         async def mine_blocks(expected_msg_count: int) -> Optional[str]:
@@ -176,7 +176,7 @@ class TestAiohttpRESTAPI:
                         request_body = {"jsonrpc": "2.0", "method": "generate", "params": [1],
                                         "id": 1}
                         async with session.post(url, json=request_body) as resp:
-                            self.logger.debug(f"mine_blocks = {await resp.json()}")
+                            self.logger.debug("mine_blocks = %s", await resp.json())
                             assert resp.status == 200, resp.reason
                     await asyncio.sleep(2)
                 except aiohttp.ClientConnectorError:

@@ -144,14 +144,14 @@ class ApplicationState(object):
                         raise ValueError("No longest chain tip in response")
 
                     if current_best_hash != longest_chain_tip['header']['hash']:
-                        self.logger.debug(f"Got new chain tip: {longest_chain_tip}")
+                        self.logger.debug("Got new chain tip: %s", longest_chain_tip)
                         current_best_hash = longest_chain_tip['header']['hash']
                         current_best_height = longest_chain_tip['height']
                     else:
                         await asyncio.sleep(1)
                         continue
                 except aiohttp.ClientConnectorError as e:
-                    # logger.error(f"HeaderSV service is unavailable on {self.header_sv_url}")
+                    # logger.error("HeaderSV service is unavailable on %s", self.header_sv_url)
                     # Any new websocket connections will be notified when HeaderSV is back online
                     current_best_hash = ""
                     await asyncio.sleep(1)
@@ -176,21 +176,21 @@ class ApplicationState(object):
                 # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client in self.get_headers_ws_clients().items():
                     try:
-                        self.logger.debug(f"Sending msg to header websocket client "
-                                          f"ws_id: {ws_client.ws_id}")
+                        self.logger.debug("Sending msg to header websocket client ws_id: %s",
+                            ws_client.ws_id)
                         await ws_client.websocket.send_bytes(tip_notification)
                     except ConnectionResetError:
-                        self.logger.error(f"Websocket disconnected")
+                        self.logger.error("Websocket disconnected")
 
                 # Send new tip notification to all connected websocket clients
                 for ws_id, ws_client_general in self.get_account_websockets().items():
                     try:
-                        self.logger.debug(f"Sending msg to general websocket client "
-                                          f"ws_id: {ws_client_general.ws_id}")
+                        self.logger.debug("Sending msg to general websocket client ws_id: %s",
+                            ws_client_general.ws_id)
                         await ws_client_general.websocket.send_json(
                             GeneralNotification(message_type="bsvapi.headers.tip", result=result))
                     except ConnectionResetError:
-                        self.logger.error(f"Websocket disconnected")
+                        self.logger.error("Websocket disconnected")
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
         finally:
@@ -235,8 +235,8 @@ class ApplicationState(object):
             while self.is_alive:
                 try:
                     msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
-                    self.logger.debug(f"Got peer channel notification for channel_id: "
-                                      f"{msg_box_api_token_id}")
+                    self.logger.debug("Got peer channel notification for channel_id: %s",
+                        msg_box_api_token_id)
                 except Exception as e:
                     logger.exception(e)
                     continue
@@ -250,13 +250,13 @@ class ApplicationState(object):
                 msg_box = notification['msg_box']
                 ws_clients = self.get_msg_box_ws_clients_by_channel_id(msg_box.id)
                 for ws_client in ws_clients:
-                    self.logger.debug(f"Sending msg to ws_id: {ws_client.ws_id}")
+                    self.logger.debug("Sending msg to ws_id: %s", ws_client.ws_id)
                     if ws_client.msg_box_internal_id == notification['msg_box'].id:
                         try:
                             msg = json.dumps(notification['notification'])
                             await ws_client.websocket.send_str(data=msg)
                         except ConnectionResetError as e:
-                            self.logger.error(f"Websocket disconnected")
+                            self.logger.error("Websocket disconnected")
 
         except Exception:
             self.logger.exception("unexpected exception in message_box_notifications_task")
@@ -385,7 +385,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
         client_pub_key: bitcoinx.PublicKey = client_priv_key.public_key
         account_id, api_key = app_state.database_context.run_in_thread(sqlite_db.create_account,
             client_pub_key.to_bytes(), forced_api_key=REGTEST_VALID_ACCOUNT_TOKEN)
-        logger.debug(f"Got RegTest account_id: {account_id}, api_key: {api_key}")
+        logger.debug("Got RegTest account_id: %s, api_key: %s", account_id, api_key)
         # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
         #     access the server as if we were doing so with an account. This should be removed
         #     when we have proper account usage in ESV.

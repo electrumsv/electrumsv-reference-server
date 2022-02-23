@@ -115,7 +115,7 @@ def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
 
     human_readable_network = os.getenv('NETWORK', 'regtest')
     network_enum = STRING_TO_NETWORK_ENUM_MAP[human_readable_network]
-    logger.debug(f"Running in {human_readable_network} mode")
+    logger.debug("Running in %s mode", human_readable_network)
 
     datastore_location = data_path / DEFAULT_DATABASE_NAME
     logger.debug("Datastore location %s", datastore_location)

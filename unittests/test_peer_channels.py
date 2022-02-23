@@ -86,11 +86,11 @@ class TestAiohttpRESTAPI:
             }
         }
 
-        self.logger.debug(f"test_create_new_channel url: {URL}")
+        self.logger.debug("test_create_new_channel url: %s", URL)
         async with aiohttp.ClientSession() as session:
             headers = {"Authorization": f"Bearer {TEST_MASTER_BEARER_TOKEN}"}
             async with session.post(URL, headers=headers, json=request_body) as resp:
-                self.logger.debug(f"resp.content = {resp.content}")
+                self.logger.debug("resp.content = %s", resp.content)
                 assert resp.status == 200, resp.reason
                 single_channel_data = await resp.json()
                 CHANNEL_ID = single_channel_data['id']
@@ -106,11 +106,11 @@ class TestAiohttpRESTAPI:
             "can_write": False
         }
         url = URL.format(channelid=CHANNEL_ID)
-        self.logger.debug(f"test_create_new_token_for_channel url: {url}")
+        self.logger.debug("test_create_new_token_for_channel url: %s", url)
         async with aiohttp.ClientSession() as session:
             headers = {"Authorization": f"Bearer {TEST_MASTER_BEARER_TOKEN}"}
             async with session.post(url, headers=headers, json=request_body) as resp:
-                self.logger.debug(f"resp.content = {resp.content}")
+                self.logger.debug("resp.content = %s", resp.content)
                 assert resp.status == 200, resp.reason
                 response_body = await resp.json()
                 CHANNEL_READ_ONLY_TOKEN_ID = response_body['id']
@@ -141,7 +141,7 @@ class TestAiohttpRESTAPI:
                 "auto_prune": True
             }
         }
-        self.logger.debug(f"test_create_new_channel url: {URL}")
+        self.logger.debug("test_create_new_channel url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
@@ -185,7 +185,7 @@ class TestAiohttpRESTAPI:
           "can_write": False
         }
         url = URL.format(channelid=CHANNEL_ID)
-        self.logger.debug(f"test_create_new_token_for_channel url: {url}")
+        self.logger.debug("test_create_new_token_for_channel url: %s", url)
         result = _successful_call(url, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
@@ -213,7 +213,7 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD)
 
         request_body = None
-        self.logger.debug(f"test_list_channels url: {URL}")
+        self.logger.debug("test_list_channels url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
@@ -254,7 +254,7 @@ class TestAiohttpRESTAPI:
 
         request_body = None
         url = URL.format(channelid=CHANNEL_ID)
-        self.logger.debug(f"test_get_single_channel_details url: {url}")
+        self.logger.debug("test_get_single_channel_details url: %s", url)
         result = _successful_call(url, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
@@ -296,7 +296,7 @@ class TestAiohttpRESTAPI:
             "locked": False
         }
         url = URL.format(channelid=CHANNEL_ID)
-        self.logger.debug(f"test_update_single_channel_properties url: {url}")
+        self.logger.debug("test_update_single_channel_properties url: %s", url)
         result = _successful_call(url, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
@@ -327,7 +327,7 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD)
 
         request_body = None
-        self.logger.debug(f"test_get_token_details url: {URL}")
+        self.logger.debug("test_get_token_details url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
@@ -369,7 +369,7 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD)
 
         request_body = None
-        self.logger.debug(f"test_get_list_of_tokens url: {URL}")
+        self.logger.debug("test_get_list_of_tokens url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, TEST_MASTER_BEARER_TOKEN)
 
@@ -393,7 +393,7 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
         request_body = {"key": "value"}
-        self.logger.debug(f"test_write_message_no_content_type_should_raise_400 url: {URL}")
+        self.logger.debug("test_write_message_no_content_type_should_raise_400 url: %s", URL)
         headers = {
             "Content-Type": "",
         }
@@ -421,7 +421,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
-        self.logger.debug(f"test_write_message_read_only_token_should_fail url: {URL}")
+        self.logger.debug("test_write_message_read_only_token_should_fail url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_READ_ONLY_TOKEN)
 
@@ -440,7 +440,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
-        self.logger.debug(f"test_write_message url: {URL}")
+        self.logger.debug("test_write_message url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_BEARER_TOKEN)
         assert result.status_code == 200, result.reason
@@ -464,7 +464,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
-        self.logger.debug(f"test_write_message url: {URL}")
+        self.logger.debug("test_write_message url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, headers,
             request_body, CHANNEL_BEARER_TOKEN)
 
@@ -491,7 +491,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD)
 
-        self.logger.debug(f"test_get_messages_head url: {URL}")
+        self.logger.debug("test_get_messages_head url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.headers['ETag'] == "1"
@@ -513,7 +513,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD)
 
-        self.logger.debug(f"test_get_messages_head url: {URL}")
+        self.logger.debug("test_get_messages_head url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.headers['ETag'] == "1"
@@ -617,15 +617,15 @@ class TestAiohttpRESTAPI:
             try:
                 async with session.ws_connect(url + f"?token={msg_box_api_token}", timeout=5.0) \
                         as ws:
-                    self.logger.info(f'Connected to {url}')
+                    self.logger.info('Connected to %s', url)
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             content = json.loads(msg.data)
-                            self.logger.info(f'New message from msg box: {content}')
+                            self.logger.info('New message from msg box: %s', content)
 
                             count += 1
                             if expected_count == count:
-                                self.logger.debug(f"Received all {expected_count} messages")
+                                self.logger.debug("Received all %s messages", expected_count)
                                 await session.close()
                                 completion_event.set()
                                 return
@@ -646,7 +646,7 @@ class TestAiohttpRESTAPI:
                 await self._subscribe_to_msg_box_notifications(url, msg_box_api_token,
                     expected_count, completion_event)
             except WebsocketUnauthorizedException:
-                self.logger.debug(f"Websocket unauthorized - bad token")
+                self.logger.debug("Websocket unauthorized - bad token")
                 assert True  # Auth should failed
 
         completion_event = asyncio.Event()
@@ -662,7 +662,7 @@ class TestAiohttpRESTAPI:
                 await self._subscribe_to_msg_box_notifications(url, msg_box_api_token,
                     expected_count, completion_event)
             except WebsocketUnauthorizedException:
-                self.logger.debug(f"Auth failed")
+                self.logger.debug("Auth failed")
                 assert False  # Auth should have passed
 
         async def push_messages(CHANNEL_ID: str, CHANNEL_BEARER_TOKEN: str,
@@ -678,7 +678,7 @@ class TestAiohttpRESTAPI:
                 async with aiohttp.ClientSession() as session:
                     headers = {"Authorization": f"Bearer {CHANNEL_BEARER_TOKEN}"}
                     async with session.post(url, headers=headers, json=request_body) as resp:
-                        self.logger.debug(f"push_messages = {await resp.json()}")
+                        self.logger.debug("push_messages = %s", await resp.json())
                         assert resp.status == 200, resp.reason
 
         async def main() -> None:
@@ -688,9 +688,9 @@ class TestAiohttpRESTAPI:
                 await self._create_read_only_token(CHANNEL_ID)
 
             EXPECTED_MSG_COUNT = 10
-            logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
-            logger.debug(f"CHANNEL_BEARER_TOKEN: {CHANNEL_BEARER_TOKEN}")
-            logger.debug(f"CHANNEL_READ_ONLY_TOKEN: {CHANNEL_READ_ONLY_TOKEN}")
+            logger.debug("CHANNEL_ID: %s", CHANNEL_ID)
+            logger.debug("CHANNEL_BEARER_TOKEN: %s", CHANNEL_BEARER_TOKEN)
+            logger.debug("CHANNEL_READ_ONLY_TOKEN: %s", CHANNEL_READ_ONLY_TOKEN)
 
             completion_event = asyncio.Event()
             url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
@@ -712,7 +712,7 @@ class TestAiohttpRESTAPI:
                 await _subscribe_to_general_notifications_peer_channels(url,
                     api_token, expected_count, completion_event)
             except WebsocketUnauthorizedException:
-                self.logger.debug(f"Websocket unauthorized - bad token")
+                self.logger.debug("Websocket unauthorized - bad token")
                 assert True  # Auth should failed
 
         completion_event = asyncio.Event()
@@ -728,7 +728,7 @@ class TestAiohttpRESTAPI:
                 await _subscribe_to_general_notifications_peer_channels(
                     url, api_token, expected_count, completion_event)
             except WebsocketUnauthorizedException:
-                self.logger.debug(f"Auth failed")
+                self.logger.debug("Auth failed")
                 assert False  # Auth should have passed
 
         async def push_messages(CHANNEL_ID: str, CHANNEL_BEARER_TOKEN: str,
@@ -745,7 +745,7 @@ class TestAiohttpRESTAPI:
                     headers = {"Authorization": f"Bearer {CHANNEL_BEARER_TOKEN}"}
 
                     async with session.post(url, headers=headers, json=request_body) as resp:
-                        self.logger.debug(f"push_messages = {await resp.json()}")
+                        self.logger.debug("push_messages = %s", await resp.json())
                         assert resp.status == 200, resp.reason
 
         async def main() -> None:
@@ -755,9 +755,9 @@ class TestAiohttpRESTAPI:
                 await self._create_read_only_token(CHANNEL_ID)
 
             EXPECTED_MSG_COUNT = 10
-            logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
-            logger.debug(f"CHANNEL_BEARER_TOKEN: {CHANNEL_BEARER_TOKEN}")
-            logger.debug(f"CHANNEL_READ_ONLY_TOKEN: {CHANNEL_READ_ONLY_TOKEN}")
+            logger.debug("CHANNEL_ID: %s", CHANNEL_ID)
+            logger.debug("CHANNEL_BEARER_TOKEN: %s", CHANNEL_BEARER_TOKEN)
+            logger.debug("CHANNEL_READ_ONLY_TOKEN: %s", CHANNEL_READ_ONLY_TOKEN)
 
             completion_event = asyncio.Event()
             url = WS_URL_GENERAL
@@ -788,7 +788,7 @@ class TestAiohttpRESTAPI:
 
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         request_body = None
-        self.logger.debug(f"test_revoke_selected_token url: {URL}")
+        self.logger.debug("test_revoke_selected_token url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, good_bearer_token)
 
@@ -802,7 +802,7 @@ class TestAiohttpRESTAPI:
 
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         request_body = None
-        self.logger.debug(f"test_revoke_selected_token url: {URL}")
+        self.logger.debug("test_revoke_selected_token url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, good_bearer_token)
         return result
@@ -824,7 +824,7 @@ class TestAiohttpRESTAPI:
 
         expired_bearer_token = CHANNEL_READ_ONLY_TOKEN
         request_body = None
-        self.logger.debug(f"test_revoke_selected_token url: {URL}")
+        self.logger.debug("test_revoke_selected_token url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
             request_body, expired_bearer_token)
 
@@ -855,7 +855,7 @@ class TestAiohttpRESTAPI:
         good_bearer_token = TEST_MASTER_BEARER_TOKEN
         for channel_id in channel_ids_for_deletion:
             url = URL_TEMPLATE.format(channelid=channel_id)
-            self.logger.debug(f"test_delete_channel url: {url}")
+            self.logger.debug("test_delete_channel url: %s", url)
             result = _successful_call(url, HTTP_METHOD, None,
                 None, good_bearer_token)
             assert result.status_code == web.HTTPNoContent.status_code

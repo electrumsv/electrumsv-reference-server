@@ -53,7 +53,7 @@ def _auth_for_channel_token(request: web.Request,
         or ((request.method.lower() == 'get' or request.method.lower() == 'head')
             and not token_object.can_read)):
         raise web.HTTPUnauthorized()
-    logger.debug(f"Request was authenticated as API token: {token}")
+    logger.debug("Request was authenticated as API token: %s", token)
     return msg_box_repository.is_authorized_to_msg_box_api_token(external_id, token_object.id)
 
 
@@ -82,14 +82,14 @@ async def list_channels(request: web.Request) -> web.Response:
     #  has the required read/write permissions
     account_id = app_state.temporary_account_id
     assert account_id is not None
-    logger.info(f"Get list of message boxes for accountid: {account_id}.")
+    logger.info("Get list of message boxes for accountid: %s", account_id)
 
     msg_boxes: list[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
     result = []
     for msg_box in msg_boxes:
         msg_box_view_get = _msg_box_get_view(request, msg_box)
         result.append(asdict(msg_box_view_get))
-    logger.info(f"Returning {len(msg_boxes)} channels for account_id: {account_id}.")
+    logger.info("Returning %d channels for account_id: %s", len(msg_boxes), account_id)
     return web.json_response(result)
 
 
@@ -112,12 +112,12 @@ async def get_single_channel_details(request: web.Request) -> web.Response:
     assert account_id is not None
     external_id = request.match_info['channelid']
 
-    logger.info(f"Get message box by external_id {external_id} for account(id) {account_id}.")
+    logger.info("Get message box by external_id %s for account(id) %s", external_id, account_id)
     msg_box: Optional[MsgBox] = msg_box_repository.get_msg_box(account_id, external_id)
     if not msg_box:
         raise web.HTTPNotFound
     msg_box_view_get = _msg_box_get_view(request, msg_box)
-    logger.info(f"Returning message box by external_id: {external_id}.")
+    logger.info("Returning message box by external_id: %s", external_id)
     return web.json_response(asdict(msg_box_view_get))
 
 
@@ -144,14 +144,14 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
         _msg_box_view_amend = MsgBoxViewModelAmend(public_read=body['public_read'],
             public_write=body['public_write'], locked=body['locked'])
 
-        logger.info(f"Updating message box by external_id {external_id} "
-                    f"for account(id) {account_id}.")
+        logger.info("Updating message box by external_id %s for account(id) %s.", external_id,
+            account_id)
         assert _msg_box_view_amend is not None
         msg_box_view_amend = msg_box_repository.update_msg_box(
             _msg_box_view_amend, external_id)
         if not msg_box_view_amend:
             raise web.HTTPNotFound()
-        logger.info(f"Message box with external_id: {external_id} was updated.")
+        logger.info("Message box with external_id: %s was updated", external_id)
         return web.json_response(data=asdict(msg_box_view_amend))
     except JSONDecodeError as e:
         logger.exception(e)
@@ -177,11 +177,11 @@ async def delete_channel(request: web.Request) -> web.Response:
     assert account_id is not None
     external_id = request.match_info['channelid']
 
-    logger.info(f"Deleting message box by external_id {external_id} "
-                f"for account(id) {account_id}.")
+    logger.info("Deleting message box by external_id %s for account(id) %s", external_id,
+        account_id)
     msg_box_repository.delete_msg_box(external_id)
 
-    logger.info(f"Channel Deleted.")
+    logger.info("Channel Deleted")
     raise web.HTTPNoContent()
 
 
@@ -205,7 +205,7 @@ async def create_new_channel(request: web.Request) -> web.Response:
         account_id = app_state.temporary_account_id
         assert account_id is not None
 
-        logger.info(f"Creating new message box for account_id: {account_id}.")
+        logger.info("Creating new message box for account_id: %s", account_id)
         body = await request.json()
         retention_view_model = RetentionViewModel(**body['retention'])
         if not retention_view_model.is_valid():
@@ -217,8 +217,8 @@ async def create_new_channel(request: web.Request) -> web.Response:
             account_id)
 
         msg_box_view_get = _msg_box_get_view(request, msg_box)
-        logger.info(f"New message box for account_id {account_id} "
-                    f"was created external_id: {msg_box_view_get.id}.")
+        logger.info("New message box for account_id %s was created external_id: %s",
+            account_id, msg_box_view_get.id)
         return web.json_response(asdict(msg_box_view_get))
     except JSONDecodeError as e:
         logger.exception(e)
@@ -374,9 +374,8 @@ async def write_message(request: web.Request) -> web.Response:
         raise web.HTTPBadGateway(reason="payload is empty")
 
     if content_length > MAX_MESSAGE_CONTENT_LENGTH:
-        logger.info(f"Payload too large to write message to channel {external_id} "
-                    f"(payload size: {content_length} bytes, "
-                    f"max allowed size: {MAX_MESSAGE_CONTENT_LENGTH} bytes).")
+        logger.info("Payload too large to write message to channel %s (payload size: %d bytes, "
+            "max allowed size: %d bytes).", external_id, content_length, MAX_MESSAGE_CONTENT_LENGTH)
         return web.Response(reason="Payload Too Large",
                             status=web.HTTPRequestEntityTooLarge.status_code)
 
@@ -409,8 +408,8 @@ async def write_message(request: web.Request) -> web.Response:
         return web.Response(reason=result.reason, status=result.status)
     # else result:
     message_id, msg_box_get_view = result
-    logger.info(f"Message {message_id} from api_token_id: {msg_box_api_token_object.id} "
-                f"written to channel {external_id}")
+    logger.info("Message %s from api_token_id: %s written to channel %s", message_id,
+        msg_box_api_token_object.id, external_id)
 
     # Send push notification
     notification_new_message_text = os.getenv('NOTIFICATION_TEXT_NEW_MESSAGE',
@@ -434,7 +433,7 @@ async def write_message(request: web.Request) -> web.Response:
 
 def _get_messages_head(external_id: str, msg_box_api_token: str,
         msg_box_repository: MsgBoxSQLiteRepository) -> None:
-    logger.debug(f"Head called for msg_box: {external_id}.")
+    logger.debug("Head called for msg_box: %s", external_id)
 
     seq = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
     if seq is None:
@@ -442,7 +441,7 @@ def _get_messages_head(external_id: str, msg_box_api_token: str,
 
     max_sequence = str(seq)
 
-    logger.debug(f"Head message sequence of msg_box: {external_id} is {max_sequence}.")
+    logger.debug("Head message sequence of msg_box: %s is %s", external_id, max_sequence)
     response_headers = {}
     response_headers.update({'User-Agent': 'ESV-Ref-Server'})
     response_headers.update({'Access-Control-Expose-Headers': 'authorization,etag'})
@@ -454,14 +453,14 @@ def _get_messages(channelid: str, api_token_id: int,
         onlyunread: bool, accept_type: str, msg_box_repository: MsgBoxSQLiteRepository) \
             -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
                      dict[str, str]]:
-    logger.info(f"Get messages for channel_id: {channelid}.")
+    logger.info("Get messages for channel_id: %s", channelid)
     # Todo - use a generator here and sequentially write the messages out to a streamed response
     result = msg_box_repository.get_messages(api_token_id, onlyunread)
     if result is None:
         raise web.HTTPNotFound(reason="messages not found or not sequenced")
 
     message_list, max_sequence = result
-    logger.info(f"Returning {len(message_list)} messages for channel: {channelid}.")
+    logger.info("Returning %d messages for channel: %s", len(message_list), channelid)
     if accept_type == 'application/octet-stream':
         raise web.HTTPNotImplemented()
     else:
@@ -546,9 +545,8 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
         body = await request.json()
         set_read_to = body['read']
 
-        logger.info(f"Flagging message sequence {sequence} from msg_box {external_id} "
-                    f"{'and all older messages ' if older else ''}"
-                    f"as {'read' if set_read_to is True else 'unread'}")
+        logger.info("Flagging message sequence %s from msg_box %s (older=%s, read=%s)",
+            sequence, external_id, older, set_read_to)
         msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
         if msg_box_api_token_obj and \
                 not msg_box_repository.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
@@ -590,7 +588,7 @@ async def delete_message(request: web.Request) -> web.Response:
     except web.HTTPException as e:
         raise e
 
-    logger.info(f"Deleting message sequence: {sequence} in msg_box: {external_id}.")
+    logger.info("Deleting message sequence: %s in msg_box: %s", sequence, external_id)
     msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
     if msg_box_api_token_obj and \
             not msg_box_repository.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
@@ -598,8 +596,8 @@ async def delete_message(request: web.Request) -> web.Response:
 
     message_metadata = msg_box_repository.get_message_metadata(external_id, int(sequence))
     if not message_metadata:
-        logger.error(f"Message metadata not found for sequence: {sequence}, "
-                     f"external_id: {external_id} - likely was already deleted")
+        logger.error("Message metadata not found for sequence: %s, external_id: %s - likely "
+            "was already deleted", sequence, external_id)
         raise web.HTTPNotFound(reason="message metadata not found - is it deleted already?")
     msg_box = msg_box_repository.get_msg_box(account_id, external_id)
     if not msg_box:
@@ -611,8 +609,8 @@ async def delete_message(request: web.Request) -> web.Response:
                             status=errors.RetentionNotExpired.status)
 
     count_deleted = msg_box_repository.delete_message(message_metadata.id)
-    logger.info(f"Deleted {count_deleted} messages for sequence: {sequence} "
-                f"in msg_box: {external_id}.")
+    logger.info("Deleted %s messages for sequence: %s in msg_box: %s", count_deleted, sequence,
+        external_id)
     raise web.HTTPOk()
 
 

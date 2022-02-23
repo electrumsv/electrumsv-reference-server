@@ -179,11 +179,11 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
             async with session.ws_connect(url + f"?token={api_token}",
                                           timeout=5.0) as ws:
 
-                logger.info(f'Connected to {url}')
+                logger.info('Connected to %s', url)
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         content = json.loads(msg.data)
-                        logger.info(f'New message: {content}')
+                        logger.info('New message: %s', content)
                         assert content['message_type'] == 'bsvapi.channels.notification'
                         assert isinstance(content['result'], dict)
                         assert isinstance(content['result']['id'], str)
@@ -193,7 +193,7 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
 
                         count += 1
                         if expected_count == count:
-                            logger.debug(f"Received all {expected_count} messages")
+                            logger.debug("Received all %d messages", expected_count)
                             await session.close()
                             completion_event.set()
                             return
