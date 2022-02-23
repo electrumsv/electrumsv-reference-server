@@ -46,11 +46,10 @@ class ApplicationState(object):
     server_keys: ServerKeys
     is_alive: bool = False
 
-    def __init__(self, app: web.Application, loop: asyncio.AbstractEventLoop,
-            network: Network, datastore_location: Path, host: str, port: int) -> None:
+    def __init__(self, app: web.Application, network: Network, datastore_location: Path,
+            host: str, port: int) -> None:
         self.logger = logging.getLogger('app_state')
         self.app = app
-        self.loop = loop
         self.host = host
         self.port = port
 
@@ -370,10 +369,9 @@ async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
 
 def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
         port: int = SERVER_PORT) -> tuple[web.Application, str, int]:
-    loop = asyncio.get_event_loop()
     app = web.Application()
     app.cleanup_ctx.append(client_session_ctx)
-    app_state = ApplicationState(app, loop, network, datastore_location, host, port)
+    app_state = ApplicationState(app, network, datastore_location, host, port)
 
     if network == network.REGTEST:
         # TODO(temporary-prototype-choice) Allow regtest key override or fallback to these?
