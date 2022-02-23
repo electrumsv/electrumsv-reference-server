@@ -84,3 +84,8 @@ ACCOUNT_MESSAGE_NAMES: dict[AccountMessageKind, str] = {
     AccountMessageKind.PEER_CHANNEL_MESSAGE: "bsvapi.channels.notification",
     AccountMessageKind.SPENT_OUTPUT_EVENT: "bsvapi.output-spends.notification",
 }
+
+
+class IndexerPushdataRegistrationFlag(IntFlag):
+    NONE = 0
+    FINALISED = 1 << 0

@@ -1,6 +1,7 @@
 
 # TODO(1.4.0) Rename this file to `websocket_account.py`.
 
+from __future__ import annotations
 import logging
 from typing import cast, TYPE_CHECKING
 import uuid
@@ -9,7 +10,6 @@ import aiohttp
 from aiohttp import web, web_exceptions
 from aiohttp.web_ws import WebSocketResponse
 
-from .sqlite_db import SQLiteDatabase
 from .types import AccountWebsocketState, AccountWebsocketMediaType
 from .utils import _try_read_bearer_token_from_query, _auth_ok
 
@@ -30,8 +30,7 @@ class GeneralWebSocket(web.View):
     async def get(self) -> WebSocketResponse:
         """The communication for this is one-way - for message box notifications only.
         Client messages will be ignored"""
-        app_state: 'ApplicationState' = self.request.app['app_state']
-        db: SQLiteDatabase = app_state.sqlite_db
+        app_state: ApplicationState = self.request.app['app_state']
 
         # Note this bearer token is the channel-specific one
         master_api_token = _try_read_bearer_token_from_query(self.request)
@@ -39,7 +38,7 @@ class GeneralWebSocket(web.View):
             raise web_exceptions.HTTPBadRequest(
                 reason="Missing 'token' query parameter (requires master bearer token)")
 
-        if not _auth_ok(master_api_token, db):
+        if not _auth_ok(master_api_token, app_state.database_context):
             raise web_exceptions.HTTPUnauthorized(
                 reason="Unauthorized - Invalid Token "
                         "(example: ?token=t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0"

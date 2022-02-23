@@ -15,8 +15,13 @@ from typing import cast, Optional, TYPE_CHECKING
 
 import aiohttp
 from aiohttp import web
-from bitcoinx import hex_str_to_hash
+from bitcoinx import hash_to_hex_str, hex_str_to_hash
 
+from .constants import IndexerPushdataRegistrationFlag
+from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
+    delete_indexer_filtering_registrations_pushdatas, \
+    finalise_indexer_filtering_registrations_pushdatas, \
+    read_indexer_filtering_registrations_pushdatas
 from .types import Outpoint, outpoint_struct
 
 if TYPE_CHECKING:
@@ -24,6 +29,12 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("handlers-indexer")
+
+
+def _check_indexer_connected(app_state: ApplicationState) -> None:
+    # We use the open web socket to the indexer as an indication that it is active/accessible.
+    if not app_state.indexer_is_connected:
+        raise web.HTTPServiceUnavailable(reason="This functionality is temporarily unavailable")
 
 
 async def mirrored_indexer_call_async(request: web.Request, *,
@@ -36,11 +47,13 @@ async def mirrored_indexer_call_async(request: web.Request, *,
     client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
 
+    _check_indexer_connected(app_state)
+
     method_name = request.method.lower()
     if body is None and method_name == "post":
         body = await request.content.read()
         if not body:
-            return web.Response(status=http.HTTPStatus.BAD_REQUEST, reason="no body provided")
+            raise web.HTTPBadRequest(reason="no body provided")
 
     accept_type = request.headers.get("Accept", "application/octet-stream")
     content_type = request.headers.get("Content-Type", "application/octet-stream")
@@ -69,7 +82,7 @@ async def mirrored_indexer_call_async(request: web.Request, *,
             return web.json_response(body=body_bytes)
 
 
-async def indexer_post_pushdata_filter_matches(request: web.Request) -> web.Response:
+async def indexer_post_restoration_search(request: web.Request) -> web.Response:
     """
     Optional endpoint if running an indexer.
 
@@ -77,6 +90,199 @@ async def indexer_post_pushdata_filter_matches(request: web.Request) -> web.Resp
     """
     # TODO(1.4.0) This should be monetised with a free quota.
     return await mirrored_indexer_call_async(request)
+
+
+async def indexer_get_transaction_filter(request: web.Request) -> web.Response:
+    # TODO(1.4.0) This should be monetised with a free quota.
+    accept_type = request.headers.get('Accept', "application/json")
+    if accept_type not in { "application/json", "application/octet-stream" }:
+        raise web.HTTPBadRequest(reason="unknown request body content type")
+
+    app_state: ApplicationState = request.app['app_state']
+
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
+
+    pushdata_hashes = read_indexer_filtering_registrations_pushdatas(app_state.database_context,
+        account_id, IndexerPushdataRegistrationFlag.FINALISED,
+        IndexerPushdataRegistrationFlag.FINALISED)
+
+    accept_type = request.headers.get('Accept', 'application/json')
+    if accept_type == 'application/octet-stream':
+        result_bytes = b"".join(pushdata_hashes)
+        return web.Response(body=result_bytes)
+    elif accept_type == 'application/json':
+        json_list: list[str] = [
+            hash_to_hex_str(pushdata_hash) for pushdata_hash in pushdata_hashes ]
+        return web.json_response(data=json.dumps(json_list))
+    else:
+        raise web.HTTPBadRequest(reason="unknown request body content type")
+
+
+async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
+    """
+    Optional endpoint if running an indexer.
+
+    Used by the client to register pushdata hashes for new/updated transactions so that they can
+    know about new occurrences of their pushdatas. This should be safe for consecutive calls
+    even for the same pushdata, as the database unique constraint should raise an integrity
+    error if there is an ongoing registration.
+    """
+    # TODO(1.4.0) This should be monetised with a free quota.
+    accept_type = request.headers.get('Accept', "application/json")
+    if accept_type not in { "application/json", "application/octet-stream" }:
+        raise web.HTTPBadRequest(reason="unknown request body content type")
+
+    # TODO(1.4.0) This should be monetised with a free quota.
+    app_state: ApplicationState = request.app['app_state']
+
+    # This is also done by the mirrored call, but we want to avoid storing local state before
+    # the indexer call in case we have to back it out.
+    _check_indexer_connected(app_state)
+
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
+
+    body = await request.content.read()
+    if not body:
+        raise web.HTTPBadRequest(reason="no body")
+
+    pushdata_hashes: set[bytes] = set()
+    content_type = request.headers.get("Content-Type")
+    body_bytes: Optional[bytes] = None
+    if content_type == 'application/json':
+        # Convert the incoming JSON representation to the internal binary representation.
+        client_outpoints_json = json.loads(body.decode('utf-8'))
+        if not isinstance(client_outpoints_json, list):
+            raise web.HTTPBadRequest(reason="payload is not a list")
+        for pushdata_hash_hex in client_outpoints_json:
+            if not isinstance(pushdata_hash_hex, str):
+                raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
+            try:
+                pushdata_hash = bytes.fromhex(pushdata_hash_hex)
+            except (ValueError, TypeError):
+                raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
+            pushdata_hashes.add(pushdata_hash)
+    elif content_type == 'application/octet-stream':
+        if len(body) % 32 != 0:
+            raise web.HTTPBadRequest(reason="binary request body malformed")
+
+        for pushdata_index in range(len(body) // 32):
+            pushdata_hashes.add(body[pushdata_index:pushdata_index+32])
+        body_bytes = body
+    else:
+        raise web.HTTPBadRequest(reason="unknown request body content type")
+
+    if not len(pushdata_hashes):
+        raise web.HTTPBadRequest(reason="no pushdata hashes provided")
+
+    registered_pushdata_hashes = await app_state.database_context.run_in_thread_async(
+        create_indexer_filtering_registrations_pushdatas, account_id, list(pushdata_hashes))
+    # If a caller is doing this for already registered pushdata hashes, then we should error
+    # and they should fix their code before they deploy it and we're forced to handle broken
+    # client applications indefinitely.
+    if len(registered_pushdata_hashes) != len(pushdata_hashes):
+        raise web.HTTPBadRequest(reason="some pushdata hashes already registered")
+
+    # Pass on the registrations to the indexer. The indexer just supports binary as it is
+    # not exposed publically, so we reserialise the hashes.
+    if body_bytes is None:
+        body_bytes = b"".join(pushdata_hashes)
+    response: Optional[web.Response] = None
+    try:
+        response = await mirrored_indexer_call_async(request, body=body_bytes)
+    finally:
+        # We only consider registrations valid if we received the only successful kind of response.
+        if response is not None and response.status == http.HTTPStatus.OK:
+            await app_state.database_context.run_in_thread_async(
+                finalise_indexer_filtering_registrations_pushdatas, account_id,
+                registered_pushdata_hashes)
+        else:
+            await app_state.database_context.run_in_thread_async(
+                delete_indexer_filtering_registrations_pushdatas, account_id,
+                registered_pushdata_hashes)
+    assert response is not None
+    return response
+
+
+async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Response:
+    """
+    Optional endpoint if running an indexer.
+
+    Used by the client to unregister pushdata hashes they are monitoring.
+    """
+    # TODO(1.4.0) This should be monetised with a free quota.
+    accept_type = request.headers.get('Accept', "application/json")
+    if accept_type not in { "application/json", "application/octet-stream" }:
+        raise web.HTTPBadRequest(reason="unknown request body content type")
+
+    # TODO(1.4.0) This should be monetised with a free quota.
+    app_state: ApplicationState = request.app['app_state']
+
+    # This is also done by the mirrored call, but we want to avoid storing local state before
+    # the indexer call in case we have to back it out.
+    _check_indexer_connected(app_state)
+
+    account_id = app_state.temporary_account_id
+    assert account_id is not None
+
+    body = await request.content.read()
+    if not body:
+        raise web.HTTPBadRequest(reason="no body")
+
+    pushdata_hashes: set[bytes] = set()
+    content_type = request.headers.get("Content-Type")
+    body_bytes: Optional[bytes] = None
+    if content_type == 'application/json':
+        # Convert the incoming JSON representation to the internal binary representation.
+        client_outpoints_json = json.loads(body.decode('utf-8'))
+        if not isinstance(client_outpoints_json, list):
+            raise web.HTTPBadRequest(reason="payload is not a list")
+        for pushdata_hash_hex in client_outpoints_json:
+            if not isinstance(pushdata_hash_hex, str):
+                raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
+            try:
+                pushdata_hash = bytes.fromhex(pushdata_hash_hex)
+            except (ValueError, TypeError):
+                raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
+            pushdata_hashes.add(pushdata_hash)
+    elif content_type == 'application/octet-stream':
+        if len(body) % 32 != 0:
+            raise web.HTTPBadRequest(reason="binary request body malformed")
+
+        for pushdata_index in range(len(body) // 32):
+            pushdata_hashes.add(body[pushdata_index:pushdata_index+32])
+        body_bytes = body
+    else:
+        raise web.HTTPBadRequest(reason="unknown request body content type")
+
+    if not len(pushdata_hashes):
+        raise web.HTTPBadRequest(reason="no pushdata hashes provided")
+
+    # TODO(1.4.0) Need to do this in a transaction and be sure that we deleted the correct ones.
+    #     That requires a change to the database support.
+    registered_pushdata_hashes = read_indexer_filtering_registrations_pushdatas(
+        app_state.database_context, account_id, IndexerPushdataRegistrationFlag.FINALISED,
+        IndexerPushdataRegistrationFlag.FINALISED)
+    if set(registered_pushdata_hashes) != set(pushdata_hashes):
+        raise web.HTTPBadRequest(reason="some pushdata hashes are not registered")
+
+    # Pass on the registrations to the indexer. The indexer just supports binary as it is
+    # not exposed publically, so we reserialise the hashes.
+    if body_bytes is None:
+        body_bytes = b"".join(pushdata_hashes)
+    response: Optional[web.Response] = None
+    try:
+        response = await mirrored_indexer_call_async(request, body=body_bytes)
+    finally:
+        # We only consider deregistrations valid if the indexer indicates success.
+        if response is not None and response.status == http.HTTPStatus.OK:
+            await app_state.database_context.run_in_thread_async(
+                delete_indexer_filtering_registrations_pushdatas,
+                account_id, list(pushdata_hashes), IndexerPushdataRegistrationFlag.FINALISED,
+                IndexerPushdataRegistrationFlag.FINALISED)
+    assert response is not None
+    return response
 
 
 async def indexer_get_transaction(request: web.Request) -> web.Response:

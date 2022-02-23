@@ -1,9 +1,17 @@
+import asyncio
 import base64
 import json
 import logging
 import os
 from pathlib import Path
 import shutil
+try:
+    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
+    import pysqlite3 as sqlite3
+except ModuleNotFoundError:
+    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
+    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
+    import sqlite3  # type: ignore
 import struct
 import sys
 import threading
@@ -12,15 +20,16 @@ from typing import Any, cast, Generator, Optional
 
 import aiohttp
 from aiohttp import WSServerHandshakeError
-import asyncio
 from bitcoinx import PublicKey, PrivateKey
+from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
 import pytest
 import requests
 
 from esv_reference_server.constants import DEFAULT_DATABASE_NAME
 from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.server import AiohttpApplication
-from esv_reference_server.sqlite_db import SQLiteDatabase
+from esv_reference_server.sqlite_db import delete_all_tables
+
 
 from server import AiohttpServer, logger, get_app
 
@@ -48,6 +57,9 @@ CHANNEL_BEARER_TOKEN: str = ""
 CHANNEL_BEARER_TOKEN_ID: int = 0
 CHANNEL_READ_ONLY_TOKEN: str = ""
 CHANNEL_READ_ONLY_TOKEN_ID: int = 0
+
+
+app_reference: Optional[AiohttpApplication] = None
 
 
 async def main(app: AiohttpApplication, host: str, port: int) -> None:
@@ -211,6 +223,7 @@ def _is_server_running(url: str) -> bool:
 
 @pytest.fixture(scope="session", autouse=True)
 def run_server() -> Generator[AiohttpApplication, None, None]:
+    global app_reference
     data_path = MODULE_DIR / "localdata"
     if data_path.exists():
         shutil.rmtree(data_path)
@@ -226,15 +239,23 @@ def run_server() -> Generator[AiohttpApplication, None, None]:
     os.environ['CHUNKED_BUFFER_SIZE'] = '1024'
 
     # Reset db before use
-    sqlite_db: SQLiteDatabase = SQLiteDatabase(data_path / DEFAULT_DATABASE_NAME)
-    sqlite_db.drop_tables()
+    database_context = DatabaseContext(str(data_path / DEFAULT_DATABASE_NAME))
+    @replace_db_context_with_connection
+    def execute_with_context(db: sqlite3.Connection) -> None:
+        delete_all_tables(db)
+    execute_with_context(database_context)
+    database_context.close()
 
     app, host, port = get_app(TEST_HOST, TEST_PORT)
-    thread = threading.Thread(target=electrumsv_reference_server_thread,
-                              args=(app, host, port),
-                              daemon=True)
-    thread.start()
-    time.sleep(3)
-    yield app
+    app_reference = app
+    try:
+        thread = threading.Thread(target=electrumsv_reference_server_thread,
+                                args=(app, host, port),
+                                daemon=True)
+        thread.start()
+        time.sleep(3)
+        yield app
+    finally:
+        app_reference = None
 
     # Teardown logic here...

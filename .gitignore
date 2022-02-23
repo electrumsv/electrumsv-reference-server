@@ -5,3 +5,4 @@
 *.mmap
 *.sqlite
 *.coverage*
+localdata

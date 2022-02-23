@@ -1,21 +1,36 @@
+from __future__ import annotations
 import asyncio
-import aiohttp
-import pytest
-from aiohttp import web, WSServerHandshakeError
 import base64
-from bitcoinx import PrivateKey, PublicKey
 import datetime
 import json
 import logging
 import os
 from pathlib import Path
+try:
+    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
+    import pysqlite3 as sqlite3
+except ModuleNotFoundError:
+    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
+    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
+    import sqlite3  # type: ignore
+from typing import TYPE_CHECKING
+
+import aiohttp
+from aiohttp import web, WSServerHandshakeError
+from bitcoinx import PrivateKey, PublicKey
+from electrumsv_database.sqlite import replace_db_context_with_connection
+import pytest
 import requests
 
-from esv_reference_server.constants import DEFAULT_DATABASE_NAME
 from esv_reference_server.errors import WebsocketUnauthorizedException
-from esv_reference_server.sqlite_db import SQLiteDatabase
-from unittests.conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
+
+from . import conftest
+from .conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
     WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels
+
+if TYPE_CHECKING:
+    from esv_reference_server.server import ApplicationState
+
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 55666
@@ -817,22 +832,19 @@ class TestAiohttpRESTAPI:
 
     @pytest.mark.asyncio
     async def test_delete_channel(self) -> None:
-        _CHANNEL_ID, _CHANNEL_BEARER_TOKEN, _CHANNEL_BEARER_TOKEN_ID = \
-            await self._create_new_channel()
+        app = conftest.app_reference
+        assert app is not None
+        app_state: ApplicationState = app["app_state"]
 
-        data_path = Path(os.environ['REFERENCE_SERVER_DATA_PATH'])
-        datastore_location = data_path / DEFAULT_DATABASE_NAME
+        await self._create_new_channel()
 
-        sqlite_db: SQLiteDatabase = SQLiteDatabase(datastore_location)
-        sql = """SELECT * FROM msg_box"""
-        rows = sqlite_db.execute(sql)
-        assert len(rows) > 0
+        @replace_db_context_with_connection
+        def read(db: sqlite3.Connection) -> list[str]:
+            rows = db.execute("SELECT externalid FROM msg_box").fetchall()
+            assert len(rows) > 0
+            return [ row[0] for row in rows ]
 
-        channel_ids_for_deletion = []
-        for row in rows:
-            id, account_id, externalid, publicread, publicwrite, locked, sequenced, \
-                minagedays, maxagedays, autoprune = row
-            channel_ids_for_deletion.append(externalid)
+        channel_ids_for_deletion = read(app_state.database_context)
 
         URL_TEMPLATE = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}'
         HTTP_METHOD = 'delete'
@@ -848,10 +860,14 @@ class TestAiohttpRESTAPI:
                 None, good_bearer_token)
             assert result.status_code == web.HTTPNoContent.status_code
 
-        sql = """SELECT * FROM msg_box"""
-        rows = sqlite_db.execute(sql)
-        assert len(rows) == 0
+        @replace_db_context_with_connection
+        def read2(db: sqlite3.Connection) -> None:
+            rows = db.execute("SELECT * FROM msg_box").fetchall()
+            assert len(rows) == 0
+        read2(app_state.database_context)
 
-        sql = """SELECT * FROM msg_box_api_token"""
-        rows = sqlite_db.execute(sql)
-        assert len(rows) == 0
+        @replace_db_context_with_connection
+        def read3(db: sqlite3.Connection) -> None:
+            rows = db.execute("SELECT * FROM msg_box_api_token").fetchall()
+            assert len(rows) == 0
+        read3(app_state.database_context)

@@ -3,19 +3,20 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 
+import asyncio
 from collections import defaultdict
 import json
-import struct
-from pathlib import Path
-
-import aiohttp
-import bitcoinx
-from aiohttp import web
-import asyncio
-import os
 import logging
+import os
+from pathlib import Path
+import struct
 import threading
 from typing import Any, AsyncIterator, Optional
+
+import aiohttp
+from aiohttp import web
+import bitcoinx
+from electrumsv_database.sqlite import DatabaseContext
 
 from .constants import ACCOUNT_MESSAGE_NAMES, Network, SERVER_HOST, SERVER_PORT
 from . import handlers, handlers_headers, handlers_indexer
@@ -24,7 +25,7 @@ from .keys import create_regtest_server_keys, ServerKeys
 from . import msg_box
 from .msg_box.controller import MsgBoxWebSocket
 from .msg_box.repositories import MsgBoxSQLiteRepository
-from .sqlite_db import SQLiteDatabase
+from . import sqlite_db
 from .types import AccountMessage, AccountWebsocketState, EndpointInfo, GeneralNotification, \
     HeadersWSClient, MsgBoxWSClient, Outpoint, PushNotification, Route
 from .utils import pack_account_message_bytes
@@ -81,8 +82,11 @@ class ApplicationState(object):
         self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
 
         self.network = network
-        self.sqlite_db = SQLiteDatabase(datastore_location)
-        self.msg_box_repository = MsgBoxSQLiteRepository(self.sqlite_db)
+
+        self.database_context = DatabaseContext(str(datastore_location))
+        self.database_context.run_in_thread(sqlite_db.setup)
+
+        self.msg_box_repository = MsgBoxSQLiteRepository(self.database_context)
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
         self.aiohttp_session: Optional[aiohttp.ClientSession] = None
@@ -90,6 +94,7 @@ class ApplicationState(object):
         # Indexer-related state.
         self._indexer_task: Optional[asyncio.Task[None]] = None
         self.indexer_url = os.getenv('INDEXER_URL')
+        self.indexer_is_connected = False
         self._output_spend_counts: dict[Outpoint, int] = defaultdict(int)
 
         # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
@@ -422,7 +427,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
                                                'bd8da76c70ad839b72b939f4071b144b')
         client_priv_key = bitcoinx.PrivateKey.from_hex(REGTEST_CLIENT_PRIVATE_KEY)
         client_pub_key: bitcoinx.PublicKey = client_priv_key.public_key
-        account_id, api_key = app_state.sqlite_db.create_account(
+        account_id, api_key = app_state.database_context.run_in_thread(sqlite_db.create_account,
             client_pub_key.to_bytes(), forced_api_key=REGTEST_VALID_ACCOUNT_TOKEN)
         logger.debug(f"Got RegTest account_id: {account_id}, api_key: {api_key}")
         # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
@@ -529,7 +534,7 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     if os.getenv("EXPOSE_INDEXER_APIS") == "1":
         app.routes.extend([
             Route(web.post("/api/v1/restoration/search",
-                handlers_indexer.indexer_post_pushdata_filter_matches), False),
+                handlers_indexer.indexer_post_restoration_search), False),
             Route(web.get("/api/v1/transaction/{txid}",
                 handlers_indexer.indexer_get_transaction), False),
             Route(web.get("/api/v1/merkle-proof/{txid}",
@@ -538,6 +543,12 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
                 handlers_indexer.indexer_post_output_spends), False),
             Route(web.post("/api/v1/output-spend/notifications",
                 handlers_indexer.indexer_post_output_spend_notifications), False),
+            Route(web.get("/api/v1/transaction/filter",
+                handlers_indexer.indexer_get_transaction_filter), False),
+            Route(web.post("/api/v1/transaction/filter",
+                handlers_indexer.indexer_post_transaction_filter), False),
+            Route(web.post("/api/v1/transaction/filter:delete",
+                handlers_indexer.indexer_post_transaction_filter_delete), False),
         ])
 
     if found_swagger:

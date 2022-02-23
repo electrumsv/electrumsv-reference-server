@@ -1,13 +1,26 @@
+from __future__ import annotations
+import base64
 import json
+import os
 import struct
 from typing import Any, Optional, TYPE_CHECKING
 
 from aiohttp import web
 
 from .constants import AccountMessageKind
+from . import sqlite_db
 
 if TYPE_CHECKING:
-    from .sqlite_db import SQLiteDatabase
+    from electrumsv_database.sqlite import DatabaseContext
+
+
+def create_external_id() -> str:
+    rnd_bytes = os.urandom(64)
+    return base64.urlsafe_b64encode(rnd_bytes).decode('utf-8')
+
+
+create_account_api_token = create_external_id  # one of these master bearer tokens per account
+create_channel_api_token = create_external_id
 
 
 def _try_read_bearer_token(request: web.Request) -> Optional[str]:
@@ -26,8 +39,9 @@ def _try_read_bearer_token_from_query(request: web.Request) -> Optional[str]:
     return auth_string
 
 
-def _auth_ok(api_key: str, db: 'SQLiteDatabase') -> bool:
-    account_id, _account_flags = db.get_account_id_for_api_key(api_key)
+def _auth_ok(api_key: str, database_context: DatabaseContext) -> bool:
+    account_id, _account_flags = database_context.run_in_thread(
+        sqlite_db.get_account_id_for_api_key, api_key)
     if account_id is None:
         return False
     return True

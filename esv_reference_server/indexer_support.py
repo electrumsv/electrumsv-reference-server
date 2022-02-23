@@ -85,6 +85,7 @@ async def manage_indexer_websocket(app_state: ApplicationState,
     try:
         async with client_session.ws_connect(websocket_url) as websocket:
             logger.debug("Connected to indexer websocket")
+            app_state.indexer_is_connected = True
             async for message in websocket:
                 if message.type == WSMsgType.ERROR:
                     logger.error("Unhandled websocket message type %s", message.type,
@@ -121,4 +122,5 @@ async def manage_indexer_websocket(app_state: ApplicationState,
         # We retry these and log them as they are in theory unexpected and the user might
         # shut down the indexer and restart it after fixing it.
         logger.exception("Unexpected exception in indexer web socket management")
-
+    finally:
+        app_state.indexer_is_connected = False

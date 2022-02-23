@@ -5,13 +5,13 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 
 from __future__ import annotations
 
-import logging
-import os
-import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Optional, Union, List, Dict, Tuple
+import logging
+import os
+from typing import TYPE_CHECKING, Optional, Union
+import uuid
 
 import aiohttp
 from aiohttp import web
@@ -30,14 +30,15 @@ from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MessageViewModelGetBinary
 
 if TYPE_CHECKING:
+    from electrumsv_database.sqlite import DatabaseContext
     from ..server import ApplicationState
-    from ..sqlite_db import SQLiteDatabase
 
 
 logger = logging.getLogger('handlers-peer-channels')
 
 
-def _auth_for_channel_token(request: web.Request, handler_name: str, token: str, external_id: str,
+def _auth_for_channel_token(request: web.Request,
+        handler_name: str, token: str, external_id: str,
         msg_box_repository: MsgBoxSQLiteRepository) -> bool:
     token_object = msg_box_repository.get_api_token(token)
     if not token_object:
@@ -58,7 +59,7 @@ def _auth_for_channel_token(request: web.Request, handler_name: str, token: str,
 
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
-    API_ROUTE_DEFS: Dict[str, EndpointInfo] = request.app.API_ROUTE_DEFS  # type: ignore
+    API_ROUTE_DEFS: dict[str, EndpointInfo] = request.app.API_ROUTE_DEFS  # type: ignore
     get_messages_url = API_ROUTE_DEFS['get_messages'].url.format(
         channelid=msg_box.external_id)
     get_messages_href = get_messages_url
@@ -69,14 +70,13 @@ def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelG
 async def list_channels(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     api_key = _try_read_bearer_token(request)
     if not api_key:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, db):
+    if not _auth_ok(api_key, app_state.database_context):
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -86,7 +86,7 @@ async def list_channels(request: web.Request) -> web.Response:
     assert account_id is not None
     logger.info(f"Get list of message boxes for accountid: {account_id}.")
 
-    msg_boxes: List[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
+    msg_boxes: list[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
     result = []
     for msg_box in msg_boxes:
         msg_box_view_get = _msg_box_get_view(request, msg_box)
@@ -98,14 +98,13 @@ async def list_channels(request: web.Request) -> web.Response:
 async def get_single_channel_details(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     api_key = _try_read_bearer_token(request)
     if not api_key:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, db):
+    if not _auth_ok(api_key, app_state.database_context):
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -128,14 +127,13 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
     try:
         app_state: ApplicationState = request.app['app_state']
         msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-        db: SQLiteDatabase = app_state.sqlite_db
 
         api_key = _try_read_bearer_token(request)
         if not api_key:
             return web.Response(reason=errors.NoBearerToken.reason,
                                 status=errors.NoBearerToken.status)
 
-        if not _auth_ok(api_key, db):
+        if not _auth_ok(api_key, app_state.database_context):
             raise web.HTTPUnauthorized
 
         # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -165,14 +163,13 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
 async def delete_channel(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     api_key = _try_read_bearer_token(request)
     if not api_key:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, db):
+    if not _auth_ok(api_key, app_state.database_context):
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -194,7 +191,6 @@ async def create_new_channel(request: web.Request) -> web.Response:
     try:
         app_state: ApplicationState = request.app['app_state']
         msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-        db: SQLiteDatabase = app_state.sqlite_db
 
         logger.debug(request.headers)
         api_key = _try_read_bearer_token(request)
@@ -202,7 +198,7 @@ async def create_new_channel(request: web.Request) -> web.Response:
             return web.Response(reason=errors.NoBearerToken.reason,
                                 status=errors.NoBearerToken.status)
 
-        if not _auth_ok(api_key, db):
+        if not _auth_ok(api_key, app_state.database_context):
             raise web.HTTPUnauthorized
 
         # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -234,14 +230,13 @@ async def create_new_channel(request: web.Request) -> web.Response:
 async def revoke_selected_token(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     api_key = _try_read_bearer_token(request)
     if not api_key:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, db):
+    if not _auth_ok(api_key, app_state.database_context):
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -258,14 +253,13 @@ async def revoke_selected_token(request: web.Request) -> web.Response:
 async def get_token_details(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     api_key = _try_read_bearer_token(request)
     if not api_key:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, db):
+    if not _auth_ok(api_key, app_state.database_context):
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -285,14 +279,13 @@ async def get_token_details(request: web.Request) -> web.Response:
 async def get_list_of_tokens(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     api_key = _try_read_bearer_token(request)
     if not api_key:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, db):
+    if not _auth_ok(api_key, app_state.database_context):
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -313,14 +306,13 @@ async def create_new_token_for_channel(request: web.Request) -> web.Response:
     try:
         app_state: ApplicationState = request.app['app_state']
         msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-        db: SQLiteDatabase = app_state.sqlite_db
 
         api_key = _try_read_bearer_token(request)
         if not api_key:
             return web.Response(reason=errors.NoBearerToken.reason,
                                 status=errors.NoBearerToken.status)
 
-        if not _auth_ok(api_key, db):
+        if not _auth_ok(api_key, app_state.database_context):
             raise web.HTTPUnauthorized
 
         # Todo - get the account_id from db and return HTTPNotFound if not found
@@ -353,7 +345,6 @@ async def create_new_token_for_channel(request: web.Request) -> web.Response:
 async def write_message(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-    db: SQLiteDatabase = app_state.sqlite_db
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
     account_id = app_state.temporary_account_id
@@ -369,8 +360,8 @@ async def write_message(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'write_message', msg_box_api_token, external_id,
-            msg_box_repository)
+        _auth_for_channel_token(request, 'write_message',
+            msg_box_api_token, external_id, msg_box_repository)
     except web.HTTPException as e:
         raise e
 
@@ -461,10 +452,10 @@ def _get_messages_head(external_id: str, msg_box_api_token: str,
     raise web.HTTPOk(headers=response_headers)
 
 
-def _get_messages(channelid: str, api_token_id: int, onlyunread: bool, accept_type: str,
-        msg_box_repository: MsgBoxSQLiteRepository) \
-            -> Tuple[List[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
-                     Dict[str, str]]:
+def _get_messages(channelid: str, api_token_id: int,
+        onlyunread: bool, accept_type: str, msg_box_repository: MsgBoxSQLiteRepository) \
+            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
+                     dict[str, str]]:
     logger.info(f"Get messages for channel_id: {channelid}.")
     # Todo - use a generator here and sequentially write the messages out to a streamed response
     result = msg_box_repository.get_messages(api_token_id, onlyunread)
@@ -503,8 +494,8 @@ async def get_messages(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'get_messages', msg_box_api_token, external_id,
-            msg_box_repository)
+        _auth_for_channel_token(request, 'get_messages',
+            msg_box_api_token, external_id, msg_box_repository)
     except web.HTTPException as e:
         raise e
 
@@ -520,8 +511,8 @@ async def get_messages(request: web.Request) -> web.Response:
         raise web.HTTPNotFound(reason="peer channel token not found")
 
     assert msg_box_api_token_obj is not None
-    message_list, response_headers = _get_messages(
-        external_id, msg_box_api_token_obj.id, onlyunread, accept_type, msg_box_repository)
+    message_list, response_headers = _get_messages(external_id, msg_box_api_token_obj.id,
+        onlyunread, accept_type, msg_box_repository)
     return web.json_response(message_list, status=200, headers=response_headers)
 
 
@@ -549,8 +540,8 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
                                 status=errors.NoBearerToken.status)
 
         try:
-            _auth_for_channel_token(request, 'mark_message_read_or_unread', msg_box_api_token,
-                external_id, msg_box_repository)
+            _auth_for_channel_token(request,
+                'mark_message_read_or_unread', msg_box_api_token, external_id, msg_box_repository)
         except web.HTTPException as e:
             raise e
 
@@ -596,8 +587,8 @@ async def delete_message(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'delete_message', msg_box_api_token, external_id,
-            msg_box_repository)
+        _auth_for_channel_token(request, 'delete_message',
+            msg_box_api_token, external_id, msg_box_repository)
     except web.HTTPException as e:
         raise e
 
@@ -650,8 +641,8 @@ class MsgBoxWebSocket(web.View):
         account_id = app_state.temporary_account_id
         assert account_id is not None
         try:
-            _auth_for_channel_token(self.request, 'MsgBoxWebSocket', msg_box_api_token,
-                                    external_id, msg_box_repository)
+            _auth_for_channel_token(self.request, 'MsgBoxWebSocket',
+                msg_box_api_token, external_id, msg_box_repository)
         except web.HTTPException as e:
             return web.Response(reason="Unauthorized - Invalid Bearer Token", status=401)
 
