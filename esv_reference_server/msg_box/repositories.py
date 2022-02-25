@@ -34,7 +34,8 @@ class MsgBoxSQLiteRepository:
         self._database_context = database_context
         database_context.run_in_thread(self.create_tables)
 
-    def create_tables(self, db: sqlite3.Connection) -> None:
+    def create_tables(self, db: Optional[sqlite3.Connection]=None) -> None:
+        assert db is not None and isinstance(db, sqlite3.Connection)
         self.create_message_box_table(db)
         self.create_messages_table(db)
         self.create_message_box_api_tokens_table(db)
@@ -124,7 +125,8 @@ class MsgBoxSQLiteRepository:
 
     def update_msg_box(self, msg_box_view_amend: MsgBoxViewModelAmend,
             external_id: str) -> Optional[view_models.MsgBoxViewModelAmend]:
-        def write(db: sqlite3.Connection) -> int:
+        def write(db: Optional[sqlite3.Connection]=None) -> int:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             sql = """
                 UPDATE msg_box
                 SET  publicread= @publicread, publicwrite= @publicwrite, locked= @locked
@@ -153,7 +155,8 @@ class MsgBoxSQLiteRepository:
             maxagedays=msg_box_view_create.retention.max_age_days,
             autoprune=msg_box_view_create.retention.auto_prune,
         )
-        def write(db: sqlite3.Connection) -> MsgBox:
+        def write(db: Optional[sqlite3.Connection]=None) -> MsgBox:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             sql = f"""
                 INSERT INTO msg_box (account_id, externalid, publicread, publicwrite, locked,
                     sequenced, minagedays, maxagedays, autoprune)
@@ -295,7 +298,8 @@ class MsgBoxSQLiteRepository:
         return read(self._database_context)
 
     def delete_msg_box(self, external_id: str) -> bool:
-        def write(db: sqlite3.Connection) -> bool:
+        def write(db: Optional[sqlite3.Connection]=None) -> bool:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             selectChannelByExternalId = "SELECT id FROM msg_box WHERE externalid = @msg_box_id;"
             result = db.execute(selectChannelByExternalId, (external_id,)).fetchone()
             if result is None:
@@ -337,7 +341,9 @@ class MsgBoxSQLiteRepository:
             api_token_view_model_create.can_write,
             datetime.utcnow()
         )
-        def write(db: sqlite3.Connection) -> Optional[tuple[int, str, str, int, int]]:
+        def write(db: Optional[sqlite3.Connection]=None) \
+                -> Optional[tuple[int, str, str, int, int]]:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             return cast(Optional[tuple[int, str, str, int, int]],
                 db.execute(sql, params).fetchone())
         row = self._database_context.run_in_thread(write)
@@ -408,7 +414,8 @@ class MsgBoxSQLiteRepository:
     def delete_api_token(self, token_id: int) -> None:
         sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
         params = (datetime.utcnow(), token_id)
-        def write(db: sqlite3.Connection) -> None:
+        def write(db: Optional[sqlite3.Connection]=None) -> None:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             db.execute(sql, params)
         self._database_context.run_in_thread(write)
 
@@ -431,7 +438,9 @@ class MsgBoxSQLiteRepository:
 
     def write_message(self, message: Message) -> tuple[int, view_models.MessageViewModelGet]:
         """Returns an error code and error reason"""
-        def write(db: sqlite3.Connection) -> tuple[int, view_models.MessageViewModelGet]:
+        def write(db: Optional[sqlite3.Connection]=None) \
+                -> tuple[int, view_models.MessageViewModelGet]:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             # Translating this query from postgres -> SQLite
             # The "FOR UPDATE" lock can be dropped because SQLite does broad-brush/global db locking
             # For the entire transaction
@@ -649,7 +658,8 @@ class MsgBoxSQLiteRepository:
             )
             AND message_status.token_id = @token_id
         """
-        def write(db: sqlite3.Connection) -> None:
+        def write(db: Optional[sqlite3.Connection]=None) -> None:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             params = (set_read_to, external_id, sequence, mark_older, token_id)
             db.execute(sql, params)
         self._database_context.run_in_thread(write)
@@ -684,7 +694,8 @@ class MsgBoxSQLiteRepository:
     def delete_message(self, message_id: int) -> int:
         sql = "UPDATE message_status SET isdeleted = true " \
               "WHERE message_id = @message_id RETURNING id;"
-        def write(db: sqlite3.Connection) -> int:
+        def write(db: Optional[sqlite3.Connection]=None) -> int:
+            assert db is not None and isinstance(db, sqlite3.Connection)
             params = (message_id,)
             rows = db.execute(sql, params).fetchall()
             return len(rows)

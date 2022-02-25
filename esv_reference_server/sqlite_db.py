@@ -1,10 +1,24 @@
 """
-Copyright(c) 2021 Bitcoin Association.
+Copyright(c) 2021, 2022 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 
-Much of this class and the connection pooling logic is inspired by and/or copied from the
-ElectrumSV's wallet_database/sqlite_support.py and helps to avoid the overhead associated with
-creating a new db connection
+Note on typing
+--------------
+
+Write database functions are run in the SQLite writer thread using the helper functions from
+the `sqlite_database` package, and because of this have to follow the pattern where the database
+is an optional last argument.
+
+    ```
+    def create_account(public_key_bytes: bytes, forced_api_key: Optional[str] = None,
+            db: Optional[sqlite3.Connection]=None) -> tuple[int, str]:
+        assert db is not None and isinstance(db, sqlite3.Connection)
+        ...
+    ```
+
+This is not required for reading functions as they should run generally run inline unless they
+are long running, in which case they should be handed off to a worker thread.
+
 """
 
 
@@ -74,10 +88,12 @@ class ChannelRow(NamedTuple):
 
 
 class DatabaseStateModifiedError(Exception):
+    # The database state was not as we required it to be in some way.
     pass
 
 
-def setup(db: sqlite3.Connection) -> None:
+def setup(db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     if int(os.getenv('REFERENCE_SERVER_RESET', "1")):
         delete_all_tables(db)
     create_tables(db)
@@ -100,8 +116,8 @@ def delete_all_tables(db: sqlite3.Connection) -> None:
 def clear_leaked_state(db: sqlite3.Connection) -> None:
     # Remove the non-finalised registrations that were perhaps interrupted by a crash.
     # May not ever happen, but cover the case where it does.
-    prune_indexer_filtering(db, IndexerPushdataRegistrationFlag.NONE,
-        IndexerPushdataRegistrationFlag.FINALISED)
+    prune_indexer_filtering(IndexerPushdataRegistrationFlag.NONE,
+        IndexerPushdataRegistrationFlag.FINALISED, db=db)
 
 # SECTION: Accounts
 
@@ -123,8 +139,9 @@ def create_account_table(db: sqlite3.Connection) -> None:
     """
     db.execute(sql)
 
-def create_account(db: sqlite3.Connection, public_key_bytes: bytes,
-        forced_api_key: Optional[str] = None) -> tuple[int, str]:
+def create_account(public_key_bytes: bytes, forced_api_key: Optional[str] = None,
+        db: Optional[sqlite3.Connection]=None) -> tuple[int, str]:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     INSERT INTO accounts (public_key_bytes, api_key) VALUES (?, ?)
     """
@@ -139,13 +156,16 @@ def create_account(db: sqlite3.Connection, public_key_bytes: bytes,
     account_id: int = cursor.lastrowid
     return account_id, api_key
 
-def deactivate_account(db: sqlite3.Connection, account_id: int, flags: AccountFlags) -> None:
+def deactivate_account(account_id: int, flags: AccountFlags,
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE accounts SET flags=flags|? WHERE account_id=?
     """
     assert flags & AccountFlags.DISABLED_MASK != 0
     db.execute(sql, (flags, account_id))
 
+@replace_db_context_with_connection
 def get_account_id_for_api_key(db: sqlite3.Connection, api_key: str) \
         -> tuple[Optional[int], AccountFlags]:
     """
@@ -162,6 +182,7 @@ def get_account_id_for_api_key(db: sqlite3.Connection, api_key: str) \
     account_id, account_flags = result[0]
     return account_id, account_flags
 
+@replace_db_context_with_connection
 def get_account_id_for_public_key_bytes(db: sqlite3.Connection, public_key_bytes: bytes) \
         -> tuple[Optional[int], AccountFlags]:
     """
@@ -178,6 +199,7 @@ def get_account_id_for_public_key_bytes(db: sqlite3.Connection, public_key_bytes
     account_id, account_flags = result[0]
     return account_id, account_flags
 
+@replace_db_context_with_connection
 def get_account_metadata_for_account_id(db: sqlite3.Connection, account_id: int) -> AccountMetadata:
     sql = """
     SELECT public_key_bytes, api_key, active_channel_id, flags, last_payment_key_index
@@ -188,7 +210,8 @@ def get_account_metadata_for_account_id(db: sqlite3.Connection, account_id: int)
         return AccountMetadata(b'', '', None, AccountFlags.NONE, 0)
     return AccountMetadata(*result[0])
 
-def set_account_registered(db: sqlite3.Connection, account_id: int) -> None:
+def set_account_registered(account_id: int, db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = "UPDATE accounts SET flags=flags&? WHERE account_id=? AND flags&?=?"
     cursor = db.execute(sql, (~AccountFlags.MID_CREATION, AccountFlags.MID_CREATION,
         account_id, AccountFlags.MID_CREATION))
@@ -217,10 +240,12 @@ def create_indexer_filtering_registrations_pushdata_table(db: sqlite3.Connection
     """
     db.execute(sql)
 
-def create_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, account_id: int,
-        pushdata_hashes: list[bytes]) -> list[bytes]:
-    # It is expected the caller has already ruled out a payment channel already being in
-    # place, and that this is dealt with before creating a new one.
+def create_indexer_filtering_registrations_pushdatas(account_id: int,
+        pushdata_hashes: list[bytes], db: Optional[sqlite3.Connection]=None) -> bool:
+    assert db is not None and isinstance(db, sqlite3.Connection)
+    # We use the SQLite `OR ABORT` clause to ensure we either insert all registrations or none
+    # if some are already present. This means we do not need to rely on rolling back the
+    # transaction because no changes should have been made in event of conflict.
     sql = """
     INSERT OR ABORT INTO indexer_filtering_registrations_pushdata
         (account_id, pushdata_hash, flags, date_created) VALUES (?, ?, ?, ?)
@@ -233,47 +258,10 @@ def create_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, acc
     try:
         db.executemany(sql, insert_rows)
     except sqlite3.IntegrityError:
-        # This will be existing unique conflict related rows that are present.
-        return []
-
-    # The `pysqlite` module is broken in the sense that you can only execute DML statements
-    # with `executemany` which means that the bulk `INSERT` cannot do a `RETURNING` and we
-    # need to do a second query to look this stuff up.
-    sql = """
-    SELECT pushdata_hash
-    FROM indexer_filtering_registrations_pushdata
-    WHERE account_id=? AND date_created=? AND flags&?=0
-    """
-    result_rows: list[tuple[bytes]] = \
-        db.execute(sql, (account_id, date_created, skip_flag)).fetchall()
-    # The results should be the registrations that were present and unfinalised or not present.
-    return [ pushdata_value for (pushdata_value,) in result_rows ]
-
-def finalise_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, account_id: int,
-        pushdata_hashes: list[bytes]) -> None:
-    sql = """
-    UPDATE indexer_filtering_registrations_pushdata SET flags=flags|? WHERE account_id=? AND
-        pushdata_hash=?
-    """
-    set_flag = IndexerPushdataRegistrationFlag.FINALISED
-    update_rows: list[tuple[int, int, bytes]] = []
-    for pushdata_value in pushdata_hashes:
-        update_rows.append((set_flag, account_id, pushdata_value))
-    db.executemany(sql, update_rows)
-
-def delete_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, account_id: int,
-        pushdata_hashes: list[bytes],
-        # These defaults include all rows no matter the flag value.
-        expected_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
-        mask: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE) -> None:
-    sql = """
-    DELETE FROM indexer_filtering_registrations_pushdata
-    WHERE account_id=? AND pushdata_hash=? AND flags&?=?
-    """
-    update_rows: list[tuple[int, bytes, int, int]] = []
-    for pushdata_value in pushdata_hashes:
-        update_rows.append((account_id, pushdata_value, mask, expected_flags))
-    db.executemany(sql, update_rows)
+        # No changes should have been made. Indicate that what was inserted was nothing.
+        return False
+    else:
+        return True
 
 @replace_db_context_with_connection
 def read_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, account_id: int,
@@ -288,8 +276,50 @@ def read_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, accou
     rows: list[tuple[bytes]] = db.execute(sql, (account_id, mask, expected_flags)).fetchall()
     return [ pushdata_hash for (pushdata_hash,) in rows ]
 
-def prune_indexer_filtering(db: sqlite3.Connection, expected_flags: IndexerPushdataRegistrationFlag,
-        mask: IndexerPushdataRegistrationFlag) -> None:
+def update_indexer_filtering_registrations_pushdatas_flags(
+        account_id: int, pushdata_hashes: list[bytes],
+        update_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
+        update_mask: Optional[IndexerPushdataRegistrationFlag]=None,
+        filter_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
+        filter_mask: Optional[IndexerPushdataRegistrationFlag]=None,
+        require_all: bool=False, db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
+    # Ensure that the update only affects the update flags if no mask is provided.
+    final_update_mask = ~update_flags if update_mask is None else update_mask
+    # Ensure that the filter only looks at the filter flags if no mask is provided.
+    final_filter_mask = filter_flags if filter_mask is None else filter_mask
+    sql = """
+    UPDATE indexer_filtering_registrations_pushdata
+    SET flags=(flags&?)|?
+    WHERE account_id=? AND pushdata_hash=? AND (flags&?)=?
+    """
+    update_rows: list[tuple[int, int, int, bytes, int, int]] = []
+    for pushdata_value in pushdata_hashes:
+        update_rows.append((final_update_mask, update_flags, account_id, pushdata_value,
+            final_filter_mask, filter_flags))
+    cursor = db.executemany(sql, update_rows)
+    if require_all and cursor.rowcount != len(pushdata_hashes):
+        raise DatabaseStateModifiedError
+
+def delete_indexer_filtering_registrations_pushdatas(account_id: int,
+        pushdata_hashes: list[bytes],
+        # These defaults include all rows no matter the flag value.
+        expected_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
+        mask: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
+    sql = """
+    DELETE FROM indexer_filtering_registrations_pushdata
+    WHERE account_id=? AND pushdata_hash=? AND flags&?=?
+    """
+    update_rows: list[tuple[int, bytes, int, int]] = []
+    for pushdata_value in pushdata_hashes:
+        update_rows.append((account_id, pushdata_value, mask, expected_flags))
+    db.executemany(sql, update_rows)
+
+def prune_indexer_filtering(expected_flags: IndexerPushdataRegistrationFlag,
+        mask: IndexerPushdataRegistrationFlag, db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     db.execute("DELETE FROM indexer_filtering_registrations_pushdata WHERE flags&?=?",
         (mask, expected_flags))
 
@@ -322,8 +352,9 @@ def create_account_payment_channel_table(db: sqlite3.Connection) -> None:
     """
     db.execute(sql)
 
-def create_account_payment_channel(db: sqlite3.Connection, account_id: int, payment_key_index: int,
-        payment_key_bytes: bytes) -> None:
+def create_account_payment_channel(account_id: int, payment_key_index: int,
+        payment_key_bytes: bytes, db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     # It is expected the caller has already ruled out a payment channel already being in
     # place, and that this is dealt with before creating a new one.
     sql = """
@@ -349,10 +380,12 @@ def create_account_payment_channel(db: sqlite3.Connection, account_id: int, paym
     """
     db.execute(sql, (channel_id, payment_key_index, account_id))
 
-def delete_account_payment_channel(db: sqlite3.Connection, channel_id: int) -> None:
+def delete_account_payment_channel(channel_id: int, db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = "DELETE FROM account_payment_channels WHERE channel_id=?"
     db.execute(sql, (channel_id,))
 
+@replace_db_context_with_connection
 def get_active_channel_for_account_id(db: sqlite3.Connection, account_id: int) \
         -> Optional[ChannelRow]:
     sql = """
@@ -370,10 +403,11 @@ def get_active_channel_for_account_id(db: sqlite3.Connection, account_id: int) \
         return None
     return ChannelRow(*result[0])
 
-def set_payment_channel_initial_contract_transaction(db: sqlite3.Connection, channel_id: int,
+def set_payment_channel_initial_contract_transaction(channel_id: int,
         funding_value: int, funding_transaction_hash: bytes, refund_value: int,
         refund_signature_bytes: bytes, contract_transaction_bytes: bytes,
-        client_payment_key_bytes: bytes) -> None:
+        client_payment_key_bytes: bytes, db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels
     SET channel_state=?, funding_value=?, funding_transaction_hash=?, refund_value=?,
@@ -387,8 +421,10 @@ def set_payment_channel_initial_contract_transaction(db: sqlite3.Connection, cha
     if cursor.rowcount != 1:
         raise DatabaseStateModifiedError
 
-def update_payment_channel_contract(db: sqlite3.Connection, channel_id: int, refund_value: int,
-        refund_signature_bytes: bytes, refund_sequence: int) -> None:
+def update_payment_channel_contract(channel_id: int, refund_value: int,
+        refund_signature_bytes: bytes, refund_sequence: int,
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels
     SET channel_state=?, refund_value=?, refund_signature_bytes=?, refund_sequence=?
@@ -399,8 +435,10 @@ def update_payment_channel_contract(db: sqlite3.Connection, channel_id: int, ref
     if cursor.rowcount != 1:
         raise DatabaseStateModifiedError
 
-def set_payment_channel_funding_transaction(db: sqlite3.Connection, channel_id: int,
-        funding_transaction_bytes: bytes, funding_output_script_bytes: bytes) -> None:
+def set_payment_channel_funding_transaction(channel_id: int,
+        funding_transaction_bytes: bytes, funding_output_script_bytes: bytes,
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels
     SET channel_state=?, funding_transaction_bytes=?, funding_output_script_bytes=?
@@ -411,11 +449,12 @@ def set_payment_channel_funding_transaction(db: sqlite3.Connection, channel_id: 
     if cursor.rowcount != 1:
         raise DatabaseStateModifiedError
 
-def set_payment_channel_closed(db: sqlite3.Connection, channel_id: int,
-        channel_state: ChannelState) -> None:
+def set_payment_channel_closed(channel_id: int, channel_state: ChannelState,
+        db: Optional[sqlite3.Connection]=None) -> None:
     """
     Raises DatabaseStateModifiedError
     """
+    assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels SET channel_state=?
     WHERE channel_id=? AND channel_state<?

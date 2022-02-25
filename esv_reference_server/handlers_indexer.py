@@ -20,8 +20,8 @@ from bitcoinx import hash_to_hex_str, hex_str_to_hash
 from .constants import IndexerPushdataRegistrationFlag
 from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
     delete_indexer_filtering_registrations_pushdatas, \
-    finalise_indexer_filtering_registrations_pushdatas, \
-    read_indexer_filtering_registrations_pushdatas
+    read_indexer_filtering_registrations_pushdatas, \
+    update_indexer_filtering_registrations_pushdatas_flags
 from .types import Outpoint, outpoint_struct
 
 if TYPE_CHECKING:
@@ -176,18 +176,17 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
     if not len(pushdata_hashes):
         raise web.HTTPBadRequest(reason="no pushdata hashes provided")
 
-    registered_pushdata_hashes = await app_state.database_context.run_in_thread_async(
-        create_indexer_filtering_registrations_pushdatas, account_id, list(pushdata_hashes))
-    # If a caller is doing this for already registered pushdata hashes, then we should error
-    # and they should fix their code before they deploy it and we're forced to handle broken
-    # client applications indefinitely.
-    if len(registered_pushdata_hashes) != len(pushdata_hashes):
+    # It is required that the client knows what it is doing and this is enforced by disallowing
+    # any registration if any of the given pushdatas are already registered.
+    if not await app_state.database_context.run_in_thread_async(
+            create_indexer_filtering_registrations_pushdatas, account_id, list(pushdata_hashes)):
         raise web.HTTPBadRequest(reason="some pushdata hashes already registered")
 
     # Pass on the registrations to the indexer. The indexer just supports binary as it is
-    # not exposed publically, so we reserialise the hashes.
+    # not exposed publically, so we reserialise the hashes if necessary.
     if body_bytes is None:
         body_bytes = b"".join(pushdata_hashes)
+
     response: Optional[web.Response] = None
     try:
         response = await mirrored_indexer_call_async(request, body=body_bytes)
@@ -195,12 +194,12 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
         # We only consider registrations valid if we received the only successful kind of response.
         if response is not None and response.status == http.HTTPStatus.OK:
             await app_state.database_context.run_in_thread_async(
-                finalise_indexer_filtering_registrations_pushdatas, account_id,
-                registered_pushdata_hashes)
+                update_indexer_filtering_registrations_pushdatas_flags, account_id,
+                    list(pushdata_hashes), update_flags=IndexerPushdataRegistrationFlag.FINALISED)
         else:
             await app_state.database_context.run_in_thread_async(
                 delete_indexer_filtering_registrations_pushdatas, account_id,
-                registered_pushdata_hashes)
+                list(pushdata_hashes))
     assert response is not None
     return response
 
@@ -216,7 +215,6 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
     if accept_type not in { "application/json", "application/octet-stream" }:
         raise web.HTTPBadRequest(reason="unknown request body content type")
 
-    # TODO(1.4.0) This should be monetised with a free quota.
     app_state: ApplicationState = request.app['app_state']
 
     # This is also done by the mirrored call, but we want to avoid storing local state before

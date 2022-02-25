@@ -57,8 +57,7 @@ async def get_account(request: web.Request) -> web.Response:
             raise web.HTTPBadRequest(reason="Invalid API key")
 
         api_key = auth_string[7:]
-        account_id, account_flags = await app_state.database_context.run_in_thread_async(
-            get_account_id_for_api_key, api_key)
+        account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
     else:
         if not request.body_exists:
             raise web.HTTPBadRequest(reason="Body required")
@@ -69,8 +68,8 @@ async def get_account(request: web.Request) -> web.Response:
             raise web.HTTPUnauthorized()
 
         public_key_bytes = bytes.fromhex(key_data["public_key_hex"])
-        account_id, account_flags = await app_state.database_context.run_in_thread_async(
-            get_account_id_for_public_key_bytes, public_key_bytes)
+        account_id, account_flags = get_account_id_for_public_key_bytes(app_state.database_context,
+            public_key_bytes)
     # We do not reveal if the account does not exist/is disabled or the key data was invalid.
     if account_id is None or account_flags & AccountFlags.DISABLED_MASK:
         raise web.HTTPUnauthorized
@@ -115,8 +114,7 @@ async def post_account_key(request: web.Request) -> web.Response:
             raise web.HTTPBadRequest
 
         api_key = auth_string[7:]
-        account_id, _account_flags = await app_state.database_context.run_in_thread_async(
-            get_account_id_for_api_key, api_key)
+        account_id, _account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
         if account_id is None:
             # We do not reveal if the account exists or the key data was invalid.
             raise web.HTTPUnauthorized
@@ -141,8 +139,8 @@ async def post_account_key(request: web.Request) -> web.Response:
             raise web.HTTPUnauthorized
 
         account_public_key_bytes = bytes.fromhex(key_data["public_key_hex"])
-        account_id, account_flags = await app_state.database_context.run_in_thread_async(
-                get_account_id_for_public_key_bytes, account_public_key_bytes)
+        account_id, account_flags = get_account_id_for_public_key_bytes(app_state.database_context,
+            account_public_key_bytes)
         if account_flags & AccountFlags.DISABLED_MASK:
             raise web.HTTPUnauthorized
 
@@ -172,6 +170,7 @@ async def post_account_key(request: web.Request) -> web.Response:
     assert payment_key_index > 0
     payment_key_bytes = generate_payment_public_key(server_keys.identity_public_key,
         account_public_key_bytes, payment_key_index).to_bytes()
+    assert account_id is not None
     assert payment_key_bytes is not None
     await app_state.database_context.run_in_thread_async(
         create_account_payment_channel, account_id, payment_key_index, payment_key_bytes)
@@ -200,14 +199,12 @@ async def post_account_channel(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason="No 'Bearer' authentication")
 
     api_key = auth_string[7:]
-    account_id, _account_flags = await app_state.database_context.run_in_thread_async(
-        get_account_id_for_api_key, api_key)
+    account_id, _account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
     if account_id is None:
         # We do not reveal if the account exists or the api key was invalid.
         raise web.HTTPUnauthorized
 
-    channel_row = await app_state.database_context.run_in_thread_async(
-        get_active_channel_for_account_id, account_id)
+    channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.PAYMENT_KEY_DISPENSED:
         raise web.HTTPBadRequest(reason="Channel invalid")
 
@@ -270,14 +267,12 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason="No 'Bearer' authentication")
 
     api_key = auth_string[7:]
-    account_id, account_flags = await app_state.database_context.run_in_thread_async(
-        get_account_id_for_api_key, api_key)
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
     if account_id is None:
         # We do not reveal if the account exists or the api key was invalid.
         raise web.HTTPUnauthorized
 
-    channel_row = await app_state.database_context.run_in_thread_async(
-        get_active_channel_for_account_id, account_id)
+    channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.CONTRACT_OPEN:
         raise web.HTTPBadRequest(reason="Channel invalid")
 
@@ -339,14 +334,12 @@ async def post_account_funding(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason="No 'Bearer' authentication")
 
     api_key = auth_string[7:]
-    account_id, _account_flags = await app_state.database_context.run_in_thread_async(
-        get_account_id_for_api_key, api_key)
+    account_id, _account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
     if account_id is None:
         # We do not reveal if the account exists or the api key was invalid.
         raise web.HTTPUnauthorized
 
-    channel_row = await app_state.database_context.run_in_thread_async(
-        get_active_channel_for_account_id, account_id)
+    channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.REFUND_ESTABLISHED:
         raise web.HTTPBadRequest(reason="Channel invalid")
 
@@ -398,14 +391,12 @@ async def delete_account_channel(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason="No 'Bearer' authentication")
 
     api_key = auth_string[7:]
-    account_id, _account_flags = await app_state.database_context.run_in_thread_async(
-        get_account_id_for_api_key, api_key)
+    account_id, _account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
     if account_id is None:
         # We do not reveal if the account exists or the api key was invalid.
         raise web.HTTPUnauthorized
 
-    channel_row = await app_state.database_context.run_in_thread_async(
-        get_active_channel_for_account_id, account_id)
+    channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.REFUND_ESTABLISHED:
         raise web.HTTPBadRequest(reason="Channel invalid")
 

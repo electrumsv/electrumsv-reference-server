@@ -40,8 +40,7 @@ def _try_read_bearer_token_from_query(request: web.Request) -> Optional[str]:
 
 
 def _auth_ok(api_key: str, database_context: DatabaseContext) -> bool:
-    account_id, _account_flags = database_context.run_in_thread(
-        sqlite_db.get_account_id_for_api_key, api_key)
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(database_context, api_key)
     if account_id is None:
         return False
     return True
