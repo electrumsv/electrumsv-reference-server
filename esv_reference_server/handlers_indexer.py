@@ -19,7 +19,7 @@ from bitcoinx import hash_to_hex_str, hex_str_to_hash
 
 from .constants import IndexerPushdataRegistrationFlag
 from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
-    delete_indexer_filtering_registrations_pushdatas, \
+    DatabaseStateModifiedError, delete_indexer_filtering_registrations_pushdatas, \
     read_indexer_filtering_registrations_pushdatas, \
     update_indexer_filtering_registrations_pushdatas_flags
 from .types import Outpoint, outpoint_struct
@@ -103,6 +103,8 @@ async def indexer_get_transaction_filter(request: web.Request) -> web.Response:
     account_id = app_state.temporary_account_id
     assert account_id is not None
 
+    # Note that this cannot be relied on to provide the client application's state, as it will
+    # contain entries in the process of being deleted for instance.
     pushdata_hashes = read_indexer_filtering_registrations_pushdatas(app_state.database_context,
         account_id, IndexerPushdataRegistrationFlag.FINALISED,
         IndexerPushdataRegistrationFlag.FINALISED)
@@ -195,7 +197,8 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
         if response is not None and response.status == http.HTTPStatus.OK:
             await app_state.database_context.run_in_thread_async(
                 update_indexer_filtering_registrations_pushdatas_flags, account_id,
-                    list(pushdata_hashes), update_flags=IndexerPushdataRegistrationFlag.FINALISED)
+                    list(pushdata_hashes),
+                    update_flags=IndexerPushdataRegistrationFlag.FINALISED)
         else:
             await app_state.database_context.run_in_thread_async(
                 delete_indexer_filtering_registrations_pushdatas, account_id,
@@ -257,28 +260,43 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
     if not len(pushdata_hashes):
         raise web.HTTPBadRequest(reason="no pushdata hashes provided")
 
-    # TODO(1.4.0) Need to do this in a transaction and be sure that we deleted the correct ones.
-    #     That requires a change to the database support.
-    registered_pushdata_hashes = read_indexer_filtering_registrations_pushdatas(
-        app_state.database_context, account_id, IndexerPushdataRegistrationFlag.FINALISED,
-        IndexerPushdataRegistrationFlag.FINALISED)
-    if set(registered_pushdata_hashes) != set(pushdata_hashes):
+    # This is required to update all the given pushdata filtering registration from finalised
+    # (and not being deleted by any other concurrent task) to finalised and being deleted. If
+    # any of the registrations are not in this state, it is assumed that the client application
+    # is broken and mismanaging it's own state.
+    try:
+        await app_state.database_context.run_in_thread_async(
+            update_indexer_filtering_registrations_pushdatas_flags,
+            account_id, list(pushdata_hashes),
+            update_flags=IndexerPushdataRegistrationFlag.DELETING,
+            filter_flags=IndexerPushdataRegistrationFlag.FINALISED,
+            filter_mask=IndexerPushdataRegistrationFlag.MASK_FINALISED_DELETING_CLEAR,
+            require_all=True)
+    except DatabaseStateModifiedError:
         raise web.HTTPBadRequest(reason="some pushdata hashes are not registered")
 
-    # Pass on the registrations to the indexer. The indexer just supports binary as it is
-    # not exposed publically, so we reserialise the hashes.
-    if body_bytes is None:
-        body_bytes = b"".join(pushdata_hashes)
     response: Optional[web.Response] = None
     try:
+        # Pass on the registrations to the indexer. The indexer just supports binary as it is
+        # not exposed publically, so we reserialise the hashes.
+        if body_bytes is None:
+            body_bytes = b"".join(pushdata_hashes)
         response = await mirrored_indexer_call_async(request, body=body_bytes)
     finally:
-        # We only consider deregistrations valid if the indexer indicates success.
         if response is not None and response.status == http.HTTPStatus.OK:
+            # The indexer applies the deregistrations successfully so we can update our state too.
             await app_state.database_context.run_in_thread_async(
                 delete_indexer_filtering_registrations_pushdatas,
                 account_id, list(pushdata_hashes), IndexerPushdataRegistrationFlag.FINALISED,
                 IndexerPushdataRegistrationFlag.FINALISED)
+        else:
+            # The state change was not able to be applied on the indexer, so we remove the
+            # `DELETING` state from the registrations.
+            await app_state.database_context.run_in_thread_async(
+                update_indexer_filtering_registrations_pushdatas_flags,
+                account_id, list(pushdata_hashes),
+                update_flags=IndexerPushdataRegistrationFlag.FINALISED,
+                update_mask=IndexerPushdataRegistrationFlag.MASK_DELETING_CLEAR)
     assert response is not None
     return response
 

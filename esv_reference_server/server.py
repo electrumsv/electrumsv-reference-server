@@ -68,7 +68,7 @@ class ApplicationState(object):
 
         self.network = network
 
-        self.database_context = DatabaseContext(str(datastore_location))
+        self.database_context = DatabaseContext(str(datastore_location), write_warn_ms=10)
         self.database_context.run_in_thread(sqlite_db.setup)
 
         self.msg_box_repository = MsgBoxSQLiteRepository(self.database_context)

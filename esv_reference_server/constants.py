@@ -87,10 +87,12 @@ ACCOUNT_MESSAGE_NAMES: dict[AccountMessageKind, str] = {
 
 
 class IndexerPushdataRegistrationFlag(IntFlag):
-    NONE                = 0
-    FINALISED           = 1 << 0
-    DELETING            = 1 << 1
+    NONE                            = 0
+    FINALISED                       = 1 << 0
+    DELETING                        = 1 << 1
 
 
-    MASK_FINALISED      = FINALISED | DELETING
+    MASK_DELETING_CLEAR             = ~DELETING
+    MASK_FINALISED_CLEAR            = ~FINALISED
+    MASK_FINALISED_DELETING_CLEAR   = ~(FINALISED | DELETING)
 

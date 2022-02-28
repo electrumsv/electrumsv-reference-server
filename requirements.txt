@@ -1,5 +1,5 @@
 bitcoinx
 requests>=2.21.0
 aiohttp
-electrumsv-database>=1.5
+electrumsv-database>=1.6
 electrumsv-node
