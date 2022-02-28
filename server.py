@@ -56,7 +56,7 @@ class AiohttpServer:
         self.app.on_shutdown.append(self.on_shutdown)
         self.app.freeze()  # No further callback modification allowed
         self.host = host
-        self.port = port
+        self.port = int(os.getenv('SERVER_PORT', port))
         self.logger = logging.getLogger("aiohttp-rest-api")
 
     async def on_startup(self, app: web.Application) -> None:
@@ -94,7 +94,7 @@ def load_dotenv(dotenv_path: Path) -> None:
 
             # Split line on "=" symbol but need to take care of base64 encoded string values.
             split_line = line.strip().split("=")
-            key = split_line[0]
+            key = split_line[0].strip()
             val = split_line[1] + "".join(["=" + part for part in split_line[2:]])
             os.environ[key] = val
 

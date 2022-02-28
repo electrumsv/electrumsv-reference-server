@@ -51,7 +51,7 @@ async def mirrored_indexer_call_async(request: web.Request, *,
 
     method_name = request.method.lower()
     if body is None and method_name == "post":
-        body = await request.content.read()
+        body = await request.read()
         if not body:
             raise web.HTTPBadRequest(reason="no body provided")
 
