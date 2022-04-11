@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime
+from http import HTTPStatus
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from electrumsv_database.sqlite import replace_db_context_with_connection
 import pytest
 import requests
 
+from esv_reference_server import sqlite_db
 from esv_reference_server.errors import WebsocketUnauthorizedException
 
 from . import conftest
@@ -44,8 +46,6 @@ REF_TYPE_OUTPUT = 0
 REF_TYPE_INPUT = 1
 STREAM_TERMINATION_BYTE = b"\x00"
 
-TEST_MASTER_BEARER_TOKEN = \
-    "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 CHANNEL_ID: str = ""
@@ -58,10 +58,17 @@ CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 class TestAiohttpRESTAPI:
 
     logger = logging.getLogger("test-aiohttp-rest-api")
+    _account_id: int
+    _api_key: str
 
     @classmethod
     def setup_class(cls) -> None:
-        pass
+        app = conftest.app_reference
+        assert app is not None
+        app_state: ApplicationState = app["app_state"]
+
+        cls._account_id, cls._api_key = app_state.database_context.run_in_thread(
+            sqlite_db.create_account, PUBLIC_KEY_1.to_bytes(compressed=True))
 
     def setup_method(self) -> None:
         pass
@@ -88,7 +95,7 @@ class TestAiohttpRESTAPI:
 
         self.logger.debug("test_create_new_channel url: %s", URL)
         async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {TEST_MASTER_BEARER_TOKEN}"}
+            headers = {"Authorization": f"Bearer {self._api_key}"}
             async with session.post(URL, headers=headers, json=request_body) as resp:
                 self.logger.debug("resp.content = %s", resp.content)
                 assert resp.status == 200, resp.reason
@@ -108,7 +115,7 @@ class TestAiohttpRESTAPI:
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug("test_create_new_token_for_channel url: %s", url)
         async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {TEST_MASTER_BEARER_TOKEN}"}
+            headers = {"Authorization": f"Bearer {self._api_key}"}
             async with session.post(url, headers=headers, json=request_body) as resp:
                 self.logger.debug("resp.content = %s", resp.content)
                 assert resp.status == 200, resp.reason
@@ -143,7 +150,7 @@ class TestAiohttpRESTAPI:
         }
         self.logger.debug("test_create_new_channel url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
 
         assert result.status_code == 200, result.reason
 
@@ -187,7 +194,7 @@ class TestAiohttpRESTAPI:
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug("test_create_new_token_for_channel url: %s", url)
         result = _successful_call(url, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
 
         assert result.status_code == 200, result.reason
 
@@ -215,7 +222,7 @@ class TestAiohttpRESTAPI:
         request_body = None
         self.logger.debug("test_list_channels url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
         assert result.status_code == 200, result.reason
 
         response_body = result.json()
@@ -256,7 +263,7 @@ class TestAiohttpRESTAPI:
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug("test_get_single_channel_details url: %s", url)
         result = _successful_call(url, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
         assert result.status_code == 200, result.reason
 
         response_body = result.json()
@@ -298,7 +305,7 @@ class TestAiohttpRESTAPI:
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug("test_update_single_channel_properties url: %s", url)
         result = _successful_call(url, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
         assert result.status_code == 200, result.reason
 
         response_body = result.json()
@@ -329,7 +336,7 @@ class TestAiohttpRESTAPI:
         request_body = None
         self.logger.debug("test_get_token_details url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
 
         assert result.status_code == 200, result.reason
 
@@ -371,7 +378,7 @@ class TestAiohttpRESTAPI:
         request_body = None
         self.logger.debug("test_get_list_of_tokens url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
-            request_body, TEST_MASTER_BEARER_TOKEN)
+            request_body, self._api_key)
 
         assert result.status_code == 200, result.reason
 
@@ -397,9 +404,8 @@ class TestAiohttpRESTAPI:
         headers = {
             "Content-Type": "",
         }
-        result = _successful_call(URL, HTTP_METHOD, headers,
-            request_body, CHANNEL_BEARER_TOKEN)
-        assert result.status_code == 400, result.reason
+        result = _successful_call(URL, HTTP_METHOD, headers, request_body, CHANNEL_BEARER_TOKEN)
+        assert result.status_code == HTTPStatus.BAD_REQUEST, result.reason
         assert result.reason is not None
 
     @pytest.mark.asyncio
@@ -722,7 +728,7 @@ class TestAiohttpRESTAPI:
     @pytest.mark.asyncio
     def test_general_purpose_websocket_peer_channel_notifications(self) -> None:
         logger = logging.getLogger("websocket-test")
-        async def wait_on_sub(url: str, api_token: str, expected_count: int,
+        async def manage_general_websocket_connection(url: str, api_token: str, expected_count: int,
                 completion_event: asyncio.Event) -> None:
             try:
                 await _subscribe_to_general_notifications_peer_channels(
@@ -762,7 +768,7 @@ class TestAiohttpRESTAPI:
             completion_event = asyncio.Event()
             url = WS_URL_GENERAL
             task1 = asyncio.create_task(
-                wait_on_sub(url, TEST_MASTER_BEARER_TOKEN, EXPECTED_MSG_COUNT,
+                manage_general_websocket_connection(url, self._api_key, EXPECTED_MSG_COUNT,
                     completion_event))
             await asyncio.sleep(3)
             task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
@@ -786,7 +792,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD)
 
-        good_bearer_token = TEST_MASTER_BEARER_TOKEN
+        good_bearer_token = self._api_key
         request_body = None
         self.logger.debug("test_revoke_selected_token url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
@@ -800,7 +806,7 @@ class TestAiohttpRESTAPI:
             .format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         HTTP_METHOD = 'delete'
 
-        good_bearer_token = TEST_MASTER_BEARER_TOKEN
+        good_bearer_token = self._api_key
         request_body = None
         self.logger.debug("test_revoke_selected_token url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None,
@@ -852,7 +858,7 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL_TEMPLATE, HTTP_METHOD)
         _bad_token(URL_TEMPLATE, HTTP_METHOD)
 
-        good_bearer_token = TEST_MASTER_BEARER_TOKEN
+        good_bearer_token = self._api_key
         for channel_id in channel_ids_for_deletion:
             url = URL_TEMPLATE.format(channelid=channel_id)
             self.logger.debug("test_delete_channel url: %s", url)

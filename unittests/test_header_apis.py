@@ -8,9 +8,9 @@ import requests
 from _pytest.outcomes import Skipped
 from aiohttp import WSServerHandshakeError
 
-from unittests.conftest import _successful_call, TEST_MASTER_BEARER_TOKEN, \
-    _assert_tip_structure_correct, REGTEST_GENESIS_BLOCK_HASH, \
-    WS_URL_HEADERS, _assert_tip_notification_structure, _assert_binary_tip_structure_correct
+from unittests.conftest import _assert_binary_tip_structure_correct, \
+    _assert_tip_notification_structure, _assert_tip_structure_correct, REGTEST_GENESIS_BLOCK_HASH, \
+    _successful_call, WS_URL_HEADERS
 
 
 class TestAiohttpRESTAPI:
@@ -46,8 +46,7 @@ class TestAiohttpRESTAPI:
         URL = 'http://127.0.0.1:55666/api/v1/headers/by-height' + query_params
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_headers_by_height url: %s", URL)
-        result: requests.Response = _successful_call(URL, HTTP_METHOD, None,
-            good_bearer_token=TEST_MASTER_BEARER_TOKEN)
+        result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
         if result.status_code == 503:
             pytest.skip(result.reason)
 

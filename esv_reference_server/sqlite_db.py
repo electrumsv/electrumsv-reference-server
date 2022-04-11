@@ -33,11 +33,12 @@ except ModuleNotFoundError:
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
 import time
-from typing import NamedTuple, Optional
+from typing import Any, cast, NamedTuple, Optional
 
 from electrumsv_database.sqlite import replace_db_context_with_connection
 
 from .constants import AccountFlags, ChannelState, IndexerPushdataRegistrationFlag
+from .types import TipFilterListEntry, TipFilterRegistrationEntry
 from .utils import create_account_api_token
 
 _ = """
@@ -92,12 +93,10 @@ class DatabaseStateModifiedError(Exception):
     pass
 
 
-def setup(db: Optional[sqlite3.Connection]=None) -> None:
+def setup(db: sqlite3.Connection) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
-    if int(os.getenv('REFERENCE_SERVER_RESET', "1")):
-        delete_all_tables(db)
     create_tables(db)
-    clear_leaked_state(db)
+    clear_stale_state(db)
 
 def create_tables(db: sqlite3.Connection) -> None:
     create_account_table(db)
@@ -105,19 +104,18 @@ def create_tables(db: sqlite3.Connection) -> None:
     create_indexer_filtering_registrations_pushdata_table(db)
 
 def delete_all_tables(db: sqlite3.Connection) -> None:
-    sql = """SELECT name FROM sqlite_master WHERE type ='table' AND name NOT LIKE 'sqlite_%';"""
-    table_names = [ row[0] for row in db.execute(sql).fetchall() ]
+    db.execute("DROP TABLE IF EXISTS indexer_filtering_registrations_pushdata")
+    db.execute("DROP TABLE IF EXISTS account_payment_channels")
+    db.execute("DROP TABLE IF EXISTS accounts")
 
-    for table_name in table_names:
-        sql = f"DROP TABLE {table_name}"
-        logger.debug("Running sql: %s", sql)
-        db.execute(sql)
-
-def clear_leaked_state(db: sqlite3.Connection) -> None:
+def clear_stale_state(db: sqlite3.Connection) -> None:
     # Remove the non-finalised registrations that were perhaps interrupted by a crash.
     # May not ever happen, but cover the case where it does.
     prune_indexer_filtering(IndexerPushdataRegistrationFlag.NONE,
         IndexerPushdataRegistrationFlag.FINALISED, db=db)
+    # Remove the finalised registrations that have expired.
+    prune_indexer_filtering(IndexerPushdataRegistrationFlag.FINALISED,
+        IndexerPushdataRegistrationFlag.FINALISED, int(time.time()), db=db)
 
 # SECTION: Accounts
 
@@ -139,17 +137,13 @@ def create_account_table(db: sqlite3.Connection) -> None:
     """
     db.execute(sql)
 
-def create_account(public_key_bytes: bytes, forced_api_key: Optional[str] = None,
-        db: Optional[sqlite3.Connection]=None) -> tuple[int, str]:
+def create_account(public_key_bytes: bytes, db: Optional[sqlite3.Connection]=None) \
+        -> tuple[int, str]:
     assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     INSERT INTO accounts (public_key_bytes, api_key) VALUES (?, ?)
     """
-    if forced_api_key:
-        # Should only be used for REGTEST_VALID_ACCOUNT_TOKEN
-        api_key = forced_api_key
-    else:
-        api_key = create_account_api_token()
+    api_key = create_account_api_token()
     cursor = db.execute(sql, (public_key_bytes, api_key))
     # This should be set for INSERT and REPLACE operations.
     assert cursor.lastrowid is not None
@@ -205,10 +199,10 @@ def get_account_metadata_for_account_id(db: sqlite3.Connection, account_id: int)
     SELECT public_key_bytes, api_key, active_channel_id, flags, last_payment_key_index
     FROM accounts WHERE account_id = ?
     """
-    result = db.execute(sql, (account_id,)).fetchall()
-    if len(result) == 0:
+    row = db.execute(sql, (account_id,)).fetchone()
+    if row is None:
         return AccountMetadata(b'', '', None, AccountFlags.NONE, 0)
-    return AccountMetadata(*result[0])
+    return AccountMetadata(*row)
 
 def set_account_registered(account_id: int, db: Optional[sqlite3.Connection]=None) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
@@ -226,11 +220,11 @@ def create_indexer_filtering_registrations_pushdata_table(db: sqlite3.Connection
     """
     sql = """
     CREATE TABLE IF NOT EXISTS indexer_filtering_registrations_pushdata (
-        account_id                  INTEGER NOT NULL,
-        pushdata_hash               BINARY(32) NOT NULL,
-        flags                       INTEGER NOT NULL DEFAULT 0,
-        date_created                INTEGER NOT NULL,
-        FOREIGN KEY(account_id) REFERENCES accounts (account_id)
+        account_id              INTEGER     NOT NULL,
+        pushdata_hash           BINARY(32)  NOT NULL,
+        flags                   INTEGER     NOT NULL,
+        date_expires            INTEGER     NOT NULL,
+        date_created            INTEGER     NOT NULL
     )
     """
     db.execute(sql)
@@ -241,48 +235,53 @@ def create_indexer_filtering_registrations_pushdata_table(db: sqlite3.Connection
     db.execute(sql)
 
 def create_indexer_filtering_registrations_pushdatas(account_id: int,
-        pushdata_hashes: list[bytes], db: Optional[sqlite3.Connection]=None) -> bool:
+        registration_entries: list[TipFilterRegistrationEntry],
+        db: Optional[sqlite3.Connection]=None) -> Optional[int]:
     assert db is not None and isinstance(db, sqlite3.Connection)
     # We use the SQLite `OR ABORT` clause to ensure we either insert all registrations or none
     # if some are already present. This means we do not need to rely on rolling back the
     # transaction because no changes should have been made in event of conflict.
     sql = """
     INSERT OR ABORT INTO indexer_filtering_registrations_pushdata
-        (account_id, pushdata_hash, flags, date_created) VALUES (?, ?, ?, ?)
+        (account_id, pushdata_hash, flags, date_created, date_expires) VALUES (?, ?, ?, ?, ?)
     """
-    skip_flag = IndexerPushdataRegistrationFlag.FINALISED
     date_created = int(time.time())
-    insert_rows: list[tuple[int, bytes, int, int]] = []
-    for pushdata_value in pushdata_hashes:
-        insert_rows.append((account_id, pushdata_value, 0, date_created))
+    insert_rows: list[tuple[int, bytes, int, int, int]] = []
+    for pushdata_value, duration_seconds in registration_entries:
+        insert_rows.append((account_id, pushdata_value, 0, date_created,
+            date_created + duration_seconds))
     try:
         db.executemany(sql, insert_rows)
     except sqlite3.IntegrityError:
         # No changes should have been made. Indicate that what was inserted was nothing.
-        return False
+        return None
     else:
-        return True
+        return date_created
 
 @replace_db_context_with_connection
 def read_indexer_filtering_registrations_pushdatas(db: sqlite3.Connection, account_id: int,
         # These defaults include all rows no matter the flag value.
         expected_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
         mask: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE) \
-            -> list[bytes]:
+            -> list[TipFilterListEntry]:
     sql = """
-    SELECT pushdata_hash FROM indexer_filtering_registrations_pushdata
+    SELECT pushdata_hash, date_created, date_expires FROM indexer_filtering_registrations_pushdata
     WHERE account_id=? AND flags&?=?
     """
-    rows: list[tuple[bytes]] = db.execute(sql, (account_id, mask, expected_flags)).fetchall()
-    return [ pushdata_hash for (pushdata_hash,) in rows ]
+    entries = list[TipFilterListEntry]()
+    for row in db.execute(sql, (account_id, mask, expected_flags)).fetchall():
+        entries.append(TipFilterListEntry(row[0], row[1], row[2] - row[1]))
+    return entries
 
 def update_indexer_filtering_registrations_pushdatas_flags(
-        account_id: int, pushdata_hashes: list[bytes],
+        account_id: int,
+        pushdata_hashes: list[bytes],
         update_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
         update_mask: Optional[IndexerPushdataRegistrationFlag]=None,
         filter_flags: IndexerPushdataRegistrationFlag=IndexerPushdataRegistrationFlag.NONE,
         filter_mask: Optional[IndexerPushdataRegistrationFlag]=None,
-        require_all: bool=False, db: Optional[sqlite3.Connection]=None) -> None:
+        require_all: bool=False,
+        db: Optional[sqlite3.Connection]=None) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
     # Ensure that the update only affects the update flags if no mask is provided.
     final_update_mask = ~update_flags if update_mask is None else update_mask
@@ -294,8 +293,8 @@ def update_indexer_filtering_registrations_pushdatas_flags(
     WHERE account_id=? AND pushdata_hash=? AND (flags&?)=?
     """
     update_rows: list[tuple[int, int, int, bytes, int, int]] = []
-    for pushdata_value in pushdata_hashes:
-        update_rows.append((final_update_mask, update_flags, account_id, pushdata_value,
+    for pushdata_hash in pushdata_hashes:
+        update_rows.append((final_update_mask, update_flags, account_id, pushdata_hash,
             final_filter_mask, filter_flags))
     cursor = db.executemany(sql, update_rows)
     if require_all and cursor.rowcount != len(pushdata_hashes):
@@ -313,15 +312,22 @@ def delete_indexer_filtering_registrations_pushdatas(account_id: int,
     WHERE account_id=? AND pushdata_hash=? AND flags&?=?
     """
     update_rows: list[tuple[int, bytes, int, int]] = []
-    for pushdata_value in pushdata_hashes:
-        update_rows.append((account_id, pushdata_value, mask, expected_flags))
+    for pushdata_hash in pushdata_hashes:
+        update_rows.append((account_id, pushdata_hash, mask, expected_flags))
     db.executemany(sql, update_rows)
 
 def prune_indexer_filtering(expected_flags: IndexerPushdataRegistrationFlag,
-        mask: IndexerPushdataRegistrationFlag, db: Optional[sqlite3.Connection]=None) -> None:
+        mask: IndexerPushdataRegistrationFlag, date_expires: Optional[int]=None,
+        db: Optional[sqlite3.Connection]=None) -> int:
     assert db is not None and isinstance(db, sqlite3.Connection)
-    db.execute("DELETE FROM indexer_filtering_registrations_pushdata WHERE flags&?=?",
-        (mask, expected_flags))
+    sql = "DELETE FROM indexer_filtering_registrations_pushdata WHERE flags&?=?"
+    sql_values: tuple[Any, ...] = (mask, expected_flags)
+    if date_expires is not None:
+        sql += " AND date_expires<=?"
+        sql_values = (mask, expected_flags, date_expires)
+    deletion_count = cast(int, db.execute(sql, sql_values).rowcount)
+    logger.info("Pruned %d indexer filtering registrations", deletion_count)
+    return deletion_count
 
 # SECTION: Account payment channels
 
@@ -347,6 +353,7 @@ def create_account_payment_channel_table(db: sqlite3.Connection) -> None:
         prepaid_balance_value       INTEGER DEFAULT 0,
         spent_balance_value         INTEGER DEFAULT 0,
         date_created                INTEGER NOT NULL,
+
         FOREIGN KEY(account_id) REFERENCES accounts (account_id)
     )
     """
@@ -361,7 +368,7 @@ def create_account_payment_channel(account_id: int, payment_key_index: int,
     SELECT active_channel_id FROM accounts WHERE account_id=?
     """
     rows = db.execute(sql, (account_id,)).fetchall()
-    assert len(rows) == 0 or rows[0][0] is None
+    assert len(rows) == 0 or rows[0][0] is None, rows
 
     channel_state = ChannelState.PAYMENT_KEY_DISPENSED
     sql = """
@@ -382,8 +389,13 @@ def create_account_payment_channel(account_id: int, payment_key_index: int,
 
 def delete_account_payment_channel(channel_id: int, db: Optional[sqlite3.Connection]=None) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = "DELETE FROM account_payment_channels WHERE channel_id=?"
-    db.execute(sql, (channel_id,))
+    sql = "DELETE FROM account_payment_channels WHERE channel_id=? RETURNING account_id"
+    row = db.execute(sql, (channel_id,)).fetchone()
+    if row is not None:
+        account_id = row[0]
+        sql = "UPDATE accounts SET active_channel_id=NULL " \
+            "WHERE account_id=? AND active_channel_id=?"
+        db.execute(sql, (account_id, channel_id)).fetchone()
 
 @replace_db_context_with_connection
 def get_active_channel_for_account_id(db: sqlite3.Connection, account_id: int) \

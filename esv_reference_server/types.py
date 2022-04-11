@@ -94,13 +94,15 @@ class AccountMessage(NamedTuple):
 
 
 
+outpoint_struct = struct.Struct(">32sI")
+output_spend_struct = struct.Struct(">32sI32sI32s")
+tip_filter_registration_struct = struct.Struct(">32sI")
+tip_filter_list_struct = struct.Struct(">32sII")
+
+
 class Outpoint(NamedTuple):
     tx_hash: bytes
     output_index: int
-
-OUTPOINT_FORMAT = ">32sI"
-outpoint_struct = struct.Struct(OUTPOINT_FORMAT)
-
 
 class OutputSpend(NamedTuple):
     out_tx_hash: bytes
@@ -114,6 +116,15 @@ class OutputSpend(NamedTuple):
             f'"{hash_to_hex_str(self.in_tx_hash)}", {self.in_index}, ' + \
             (f'"{hash_to_hex_str(self.block_hash)}"' if self.block_hash else 'None') +')'
 
-OUTPUT_SPEND_FORMAT = ">32sI32sI32s"
-output_spend_struct = struct.Struct(OUTPUT_SPEND_FORMAT)
+class TipFilterRegistrationEntry(NamedTuple):
+    pushdata_hash: bytes
+    duration_seconds: int
 
+class TipFilterListEntry(NamedTuple):
+    pushdata_hash: bytes
+    date_created: int
+    duration_seconds: int
+
+    def __repr__(self) -> str:
+        return f"TipFilterListEntry({self.pushdata_hash.hex()}, {self.date_created}, " \
+            f"{self.duration_seconds})"

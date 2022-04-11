@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+from http import HTTPStatus
 import logging
 import os
 from pathlib import Path
@@ -47,8 +48,6 @@ REF_TYPE_OUTPUT = 0
 REF_TYPE_INPUT = 1
 STREAM_TERMINATION_BYTE = b"\x00"
 
-TEST_MASTER_BEARER_TOKEN = \
-    "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ=="
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
 CHANNEL_ID: str = ""
@@ -87,7 +86,7 @@ def _no_auth(url: str, method: str) -> None:
     assert method.lower() in {'get', 'post', 'head', 'delete', 'put'}
     request_call = getattr(requests, method.lower())
     result = request_call(url)
-    assert result.status_code == 400, result.reason
+    assert result.status_code == HTTPStatus.BAD_REQUEST, result.reason
     assert result.reason is not None  # {"authorization": "is required"}
 
 
@@ -98,7 +97,7 @@ def _wrong_auth_type(url: str, method: str) -> None:
     headers = {}
     headers["Authorization"] = "Basic xyz"
     result = request_call(url, headers=headers)
-    assert result.status_code == 400, result.reason
+    assert result.status_code == HTTPStatus.BAD_REQUEST, result.reason
     assert result.reason is not None
 
 

@@ -32,7 +32,6 @@ class MsgBoxSQLiteRepository:
     def __init__(self, database_context: DatabaseContext) -> None:
         self.logger = logging.getLogger("msg-box-sqlite-db")
         self._database_context = database_context
-        database_context.run_in_thread(self.create_tables)
 
     def create_tables(self, db: Optional[sqlite3.Connection]=None) -> None:
         assert db is not None and isinstance(db, sqlite3.Connection)
@@ -40,7 +39,13 @@ class MsgBoxSQLiteRepository:
         self.create_messages_table(db)
         self.create_message_box_api_tokens_table(db)
         self.create_message_status_table(db)
-        return None
+
+    def drop_tables(self, db: Optional[sqlite3.Connection]=None) -> None:
+        assert db is not None and isinstance(db, sqlite3.Connection)
+        db.execute("DROP TABLE IF EXISTS message_status")
+        db.execute("DROP TABLE IF EXISTS msg_box_api_token")
+        db.execute("DROP TABLE IF EXISTS message")
+        db.execute("DROP TABLE IF EXISTS msg_box")
 
     def create_message_box_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
@@ -67,6 +72,7 @@ class MsgBoxSQLiteRepository:
     def create_messages_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
+        # TODO(1.4.0) Sqlite. There is no TIMESTAMP type. What is this?
         sql = ("""
             CREATE TABLE IF NOT EXISTS message (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,6 +110,7 @@ class MsgBoxSQLiteRepository:
     def create_message_box_api_tokens_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
+        # TODO(1.4.0) Sqlite. There is no TIMESTAMP type. What is this?
         sql = ("""CREATE TABLE IF NOT EXISTS msg_box_api_token (
               id                    INTEGER PRIMARY KEY AUTOINCREMENT,
               account_id            BIGINT             NOT NULL,
@@ -238,6 +245,34 @@ class MsgBoxSQLiteRepository:
             return msg_box_api_tokens
         return read(self._database_context)
 
+    def get_message_box_by_id(self, message_box_id: int) -> Optional[MsgBox]:
+        sql = """
+            SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced,
+                   minagedays, maxagedays, autoprune,
+                   (SELECT max(seq) FROM message WHERE msg_box.id = message.msg_box_id) AS seq
+            FROM msg_box
+            WHERE id = @message_box_id
+        """
+        @replace_db_context_with_connection
+        def read(db: sqlite3.Connection) -> Optional[MsgBox]:
+            nonlocal message_box_id
+            row = db.execute(sql, (message_box_id,)).fetchone()
+            if row is None:
+                return None
+
+            id, account_id, externalid, publicread, publicwrite, locked, \
+                sequenced, minagedays, maxagedays, autoprune, head_message_sequence = row
+            msg_box_api_tokens = self.get_msg_box_tokens(id)
+            head_message_sequence = head_message_sequence if head_message_sequence else 0
+
+            return MsgBox(id=id, account_id=account_id, external_id=externalid,
+                public_read=publicread, public_write=publicwrite, locked=locked,
+                sequenced=sequenced, min_age_days=minagedays, max_age_days=maxagedays,
+                autoprune=autoprune, api_tokens=msg_box_api_tokens,
+                head_message_sequence=head_message_sequence)
+
+        return read(self._database_context)
+
     def get_msg_box(self, account_id: int, externalid: str) -> Optional[MsgBox]:
         sql = """
             SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced,
@@ -312,13 +347,11 @@ class MsgBoxSQLiteRepository:
             # We are not using a cache (at the present moment) so this is skipped.
 
             statements = [
-                """DELETE FROM message_status
-                        WHERE message_id IN (
-                            SELECT id FROM message WHERE message.msg_box_id = @msg_box_id
-                        );""",
-                """DELETE FROM message WHERE msg_box_id = @msg_box_id;""",
-                """DELETE FROM msg_box_api_token WHERE msg_box_id = @msg_box_id;""",
-                """DELETE FROM msg_box WHERE id = @msg_box_id;""",
+                """DELETE FROM message_status WHERE message_id IN (
+                    SELECT id FROM message WHERE message.msg_box_id = @msg_box_id)""",
+                "DELETE FROM message WHERE msg_box_id = @msg_box_id",
+                "DELETE FROM msg_box_api_token WHERE msg_box_id = @msg_box_id",
+                "DELETE FROM msg_box WHERE id = @msg_box_id",
             ]
             for sql in statements:
                 db.execute(sql, (msg_box_id,))
@@ -367,18 +400,20 @@ class MsgBoxSQLiteRepository:
             return None
         return read(self._database_context)
 
-    # Todo - Add an LRU cache for this request
     def get_api_token(self, token: str) -> Optional[MsgBoxAPIToken]:
-        sql = "SELECT id, account_id, msg_box_id, token, description, canread, canwrite, " \
-                  "validfrom, validto FROM msg_box_api_token " \
-              "WHERE token = @token and (validto IS NULL OR validto >= @validto)"
+        sql = """
+            SELECT id, account_id, msg_box_id, token, description, canread, canwrite, validfrom,
+                validto
+            FROM msg_box_api_token
+            WHERE token = @token and (validto IS NULL OR validto >= @validto)
+        """
         params = (token, datetime.utcnow())
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[MsgBoxAPIToken]:
-            rows = db.execute(sql, params).fetchall()
-            if len(rows) != 0:
-                id, account_id, msg_box_id, token, description, \
-                    canread, canwrite, validfrom, validto = rows[0]
+            row = db.execute(sql, params).fetchone()
+            if row is not None:
+                id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, \
+                    validto = row
                 return MsgBoxAPIToken(id, account_id, msg_box_id,
                     token, description, bool(canread), bool(canwrite), validfrom, validto)
             return None
@@ -419,21 +454,24 @@ class MsgBoxSQLiteRepository:
             db.execute(sql, params)
         self._database_context.run_in_thread(write)
 
-    def is_authorized_to_msg_box_api_token(self, externalid: str, token_id: int) -> bool:
+    def get_api_token_authorization_data_for_msg_box(self, externalid: str, token_id: int) \
+            -> Optional[int]:
+        """
+        If the given message box api token with id `token_id` is linked to the message box
+        with externalid `externalid` then we return the internal message box id `id`.
+        """
         sql = """
-            SELECT COUNT('x') FROM msg_box_api_token
+            SELECT msg_box.id
+            FROM msg_box_api_token
             INNER JOIN msg_box ON msg_box_api_token.msg_box_id = msg_box.id
             WHERE msg_box.externalid = @externalid and msg_box_api_token.id = @token_id
         """
         params = (externalid, token_id)
         @replace_db_context_with_connection
-        def read(db: sqlite3.Connection) -> bool:
+        def read(db: sqlite3.Connection) -> Optional[int]:
             rows = db.execute(sql, params).fetchall()
-            if len(rows) != 0:
-                result = rows[0][0]
-                if result != 0:
-                    return True
-            return False
+            assert len(rows) == 1
+            return cast(int, rows[0][0])
         return read(self._database_context)
 
     def write_message(self, message: Message) -> tuple[int, view_models.MessageViewModelGet]:

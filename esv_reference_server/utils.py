@@ -39,13 +39,6 @@ def _try_read_bearer_token_from_query(request: web.Request) -> Optional[str]:
     return auth_string
 
 
-def _auth_ok(api_key: str, database_context: DatabaseContext) -> bool:
-    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(database_context, api_key)
-    if account_id is None:
-        return False
-    return True
-
-
 def pack_account_message_bytes(message_kind: AccountMessageKind, message_data: Any) -> bytes:
     """
     Serialise an outgoing account message as bytes.

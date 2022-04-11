@@ -10,8 +10,8 @@ import aiohttp
 from aiohttp import web, web_exceptions
 from aiohttp.web_ws import WebSocketResponse
 
+from . import sqlite_db
 from .types import AccountWebsocketState, AccountWebsocketMediaType
-from .utils import _try_read_bearer_token_from_query, _auth_ok
 
 if TYPE_CHECKING:
     from esv_reference_server.server import ApplicationState
@@ -32,23 +32,19 @@ class GeneralWebSocket(web.View):
         Client messages will be ignored"""
         app_state: ApplicationState = self.request.app['app_state']
 
-        # Note this bearer token is the channel-specific one
-        master_api_token = _try_read_bearer_token_from_query(self.request)
-        if not master_api_token:
+        # Note this bearer token is the account-specific one
+        api_key = self.request.query.get('token', None)
+        if api_key is None:
             raise web_exceptions.HTTPBadRequest(
                 reason="Missing 'token' query parameter (requires master bearer token)")
 
-        if not _auth_ok(master_api_token, app_state.database_context):
+        account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+            app_state.database_context, api_key)
+        if account_id is None:
             raise web_exceptions.HTTPUnauthorized(
                 reason="Unauthorized - Invalid Token "
                         "(example: ?token=t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0"
                         "_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==)")
-
-        # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
-        #     access the server as if we were doing so with an account. This should be removed
-        #     when we have proper account usage in ESV.
-        assert app_state.temporary_account_id is not None
-        account_id = app_state.temporary_account_id
 
         ws_id = str(uuid.uuid4())
         accept_type_text = self.request.headers.get('Accept', 'application/json')

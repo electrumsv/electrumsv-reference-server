@@ -11,7 +11,7 @@ from __future__ import annotations
 import http
 import json
 import logging
-from typing import cast, Optional, TYPE_CHECKING
+from typing import Any, cast, Optional, TYPE_CHECKING
 
 import aiohttp
 from aiohttp import web
@@ -20,9 +20,10 @@ from bitcoinx import hash_to_hex_str, hex_str_to_hash
 from .constants import IndexerPushdataRegistrationFlag
 from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
     DatabaseStateModifiedError, delete_indexer_filtering_registrations_pushdatas, \
-    read_indexer_filtering_registrations_pushdatas, \
+    get_account_id_for_api_key, read_indexer_filtering_registrations_pushdatas, \
     update_indexer_filtering_registrations_pushdatas_flags
-from .types import Outpoint, outpoint_struct
+from .types import Outpoint, outpoint_struct, tip_filter_list_struct, \
+    tip_filter_registration_struct, TipFilterRegistrationEntry
 
 if TYPE_CHECKING:
     from .server import ApplicationState
@@ -71,8 +72,8 @@ async def mirrored_indexer_call_async(request: web.Request, *,
         # TODO This is not quite correct. There are dozens of arcane response status codes between
         #     the first error `BAD_REQUEST` and the last real success `ACCEPTED`.
         if not response.ok:
-            logger.debug("Mirrored response failed, url=%s, status=%d", url_to_fetch,
-                response.status)
+            logger.debug("Mirrored response failed, url=%s, status=%d, reason=%s", url_to_fetch,
+                response.status, response.reason)
             return web.Response(reason=response.reason, status=response.status)
 
         body_bytes = await response.read()
@@ -80,6 +81,36 @@ async def mirrored_indexer_call_async(request: web.Request, *,
             return web.Response(body=body_bytes)
         else:
             return web.json_response(body=body_bytes)
+
+
+async def indexer_get_indexer_settings(request: web.Request) -> web.Response:
+    app_state: ApplicationState = request.app['app_state']
+
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPUnauthorized()
+    api_key = auth_string[7:]
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized()
+
+    return await mirrored_indexer_call_async(request,
+        query_params={ "account_id": str(account_id) })
+
+
+async def indexer_post_indexer_settings(request: web.Request) -> web.Response:
+    app_state: ApplicationState = request.app['app_state']
+
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPUnauthorized()
+    api_key = auth_string[7:]
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized()
+
+    return await mirrored_indexer_call_async(request,
+        query_params={ "account_id": str(account_id) })
 
 
 async def indexer_post_restoration_search(request: web.Request) -> web.Response:
@@ -100,23 +131,32 @@ async def indexer_get_transaction_filter(request: web.Request) -> web.Response:
 
     app_state: ApplicationState = request.app['app_state']
 
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPUnauthorized()
+    api_key = auth_string[7:]
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized()
 
     # Note that this cannot be relied on to provide the client application's state, as it will
     # contain entries in the process of being deleted for instance.
-    pushdata_hashes = read_indexer_filtering_registrations_pushdatas(app_state.database_context,
+    list_datas = read_indexer_filtering_registrations_pushdatas(app_state.database_context,
         account_id, IndexerPushdataRegistrationFlag.FINALISED,
         IndexerPushdataRegistrationFlag.FINALISED)
 
     accept_type = request.headers.get('Accept', 'application/json')
     if accept_type == 'application/octet-stream':
-        result_bytes = b"".join(pushdata_hashes)
-        return web.Response(body=result_bytes)
+        # Pack the binary array of outpoints into the bytearray.
+        byte_buffer = bytearray(len(list_datas) * tip_filter_list_struct.size)
+        for data_index, list_data in enumerate(list_datas):
+            tip_filter_list_struct.pack_into(byte_buffer, data_index * tip_filter_list_struct.size,
+                *list_data)
+        return web.Response(body=byte_buffer)
     elif accept_type == 'application/json':
-        json_list: list[str] = [
-            hash_to_hex_str(pushdata_hash) for pushdata_hash in pushdata_hashes ]
-        return web.json_response(data=json.dumps(json_list))
+        json_object: list[list[Any]] = [ [ hash_to_hex_str(data.pushdata_hash), data.date_created,
+            data.duration_seconds ] for data in list_datas ]
+        return web.json_response(data=json.dumps(json_object))
     else:
         raise web.HTTPBadRequest(reason="unknown request body content type")
 
@@ -132,77 +172,93 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
     """
     # TODO(1.4.0) This should be monetised with a free quota.
     accept_type = request.headers.get('Accept', "application/json")
-    if accept_type not in { "application/json", "application/octet-stream" }:
-        raise web.HTTPBadRequest(reason="unknown request body content type")
+    if accept_type != "application/json":
+        raise web.HTTPBadRequest(reason="unknown response/Accept mimetype")
 
-    # TODO(1.4.0) This should be monetised with a free quota.
     app_state: ApplicationState = request.app['app_state']
 
     # This is also done by the mirrored call, but we want to avoid storing local state before
     # the indexer call in case we have to back it out.
     _check_indexer_connected(app_state)
 
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPUnauthorized()
+    api_key = auth_string[7:]
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized()
 
     body = await request.content.read()
     if not body:
         raise web.HTTPBadRequest(reason="no body")
 
-    pushdata_hashes: set[bytes] = set()
-    content_type = request.headers.get("Content-Type")
     body_bytes: Optional[bytes] = None
+    registration_entries = list[TipFilterRegistrationEntry]()
+    content_type = request.headers.get("Content-Type")
     if content_type == 'application/json':
         # Convert the incoming JSON representation to the internal binary representation.
-        client_outpoints_json = json.loads(body.decode('utf-8'))
-        if not isinstance(client_outpoints_json, list):
+        registration_entries_json = json.loads(body.decode('utf-8'))
+        if not isinstance(registration_entries_json, list):
             raise web.HTTPBadRequest(reason="payload is not a list")
-        for pushdata_hash_hex in client_outpoints_json:
-            if not isinstance(pushdata_hash_hex, str):
+        for entry in registration_entries_json:
+            if not isinstance(entry, list) or len(entry) != 2 or not isinstance(entry[1], int):
                 raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
             try:
-                pushdata_hash = bytes.fromhex(pushdata_hash_hex)
+                pushdata_hash = bytes.fromhex(entry[0])
             except (ValueError, TypeError):
                 raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
-            pushdata_hashes.add(pushdata_hash)
+            registration_entries.append(TipFilterRegistrationEntry(pushdata_hash, entry[1]))
     elif content_type == 'application/octet-stream':
-        if len(body) % 32 != 0:
+        if len(body) % tip_filter_registration_struct.size != 0:
             raise web.HTTPBadRequest(reason="binary request body malformed")
 
-        for pushdata_index in range(len(body) // 32):
-            pushdata_hashes.add(body[pushdata_index:pushdata_index+32])
+        for entry_index in range(len(body) // tip_filter_registration_struct.size):
+            entry = TipFilterRegistrationEntry(*tip_filter_registration_struct.unpack_from(body,
+                entry_index * tip_filter_registration_struct.size))
+            registration_entries.append(entry)
+
         body_bytes = body
     else:
         raise web.HTTPBadRequest(reason="unknown request body content type")
 
-    if not len(pushdata_hashes):
-        raise web.HTTPBadRequest(reason="no pushdata hashes provided")
+    if not len(registration_entries):
+        raise web.HTTPBadRequest(reason="no registration entries provided")
 
+    logger.debug("Registering pushdata hashes with database %s", registration_entries)
     # It is required that the client knows what it is doing and this is enforced by disallowing
     # any registration if any of the given pushdatas are already registered.
-    if not await app_state.database_context.run_in_thread_async(
-            create_indexer_filtering_registrations_pushdatas, account_id, list(pushdata_hashes)):
+    date_created = await app_state.database_context.run_in_thread_async(
+        create_indexer_filtering_registrations_pushdatas, account_id, registration_entries)
+    if date_created is None:
         raise web.HTTPBadRequest(reason="some pushdata hashes already registered")
 
     # Pass on the registrations to the indexer. The indexer just supports binary as it is
     # not exposed publically, so we reserialise the hashes if necessary.
     if body_bytes is None:
-        body_bytes = b"".join(pushdata_hashes)
+        body_bytes = bytearray(len(registration_entries) * tip_filter_registration_struct.size)
+        for data_index, registration_data in enumerate(registration_entries):
+            tip_filter_registration_struct.pack_into(body_bytes,
+                data_index * tip_filter_registration_struct.size, *registration_data)
 
+    logger.debug("Registering pushdata hashes with indexer")
     response: Optional[web.Response] = None
     try:
-        response = await mirrored_indexer_call_async(request, body=body_bytes)
+        response = await mirrored_indexer_call_async(request, body=body_bytes,
+            query_params={ "account_id": str(account_id), "date_created": str(date_created) })
     finally:
         # We only consider registrations valid if we received the only successful kind of response.
+        pushdata_hashes = [ entry.pushdata_hash for entry in registration_entries ]
         if response is not None and response.status == http.HTTPStatus.OK:
+            logger.debug("Finalising temporary registered pushdata hashes in database")
             await app_state.database_context.run_in_thread_async(
-                update_indexer_filtering_registrations_pushdatas_flags, account_id,
-                    list(pushdata_hashes),
+                update_indexer_filtering_registrations_pushdatas_flags, account_id, pushdata_hashes,
                     update_flags=IndexerPushdataRegistrationFlag.FINALISED)
+            # TODO(1.4.0) Tip filter. Expire entries.
         else:
+            logger.debug("Deleting temporary registered pushdata hashes in database")
             await app_state.database_context.run_in_thread_async(
-                delete_indexer_filtering_registrations_pushdatas, account_id,
-                list(pushdata_hashes))
+                delete_indexer_filtering_registrations_pushdatas, account_id, pushdata_hashes)
     assert response is not None
     return response
 
@@ -220,12 +276,17 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
 
     app_state: ApplicationState = request.app['app_state']
 
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPUnauthorized()
+    api_key = auth_string[7:]
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized()
+
     # This is also done by the mirrored call, but we want to avoid storing local state before
     # the indexer call in case we have to back it out.
     _check_indexer_connected(app_state)
-
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
 
     body = await request.content.read()
     if not body:
@@ -275,13 +336,15 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
     except DatabaseStateModifiedError:
         raise web.HTTPBadRequest(reason="some pushdata hashes are not registered")
 
+    # Pass on the registrations to the indexer. The indexer just supports binary as it is
+    # not exposed publically, so we reserialise the hashes.
+    if body_bytes is None:
+        body_bytes = b"".join(pushdata_hashes)
+
     response: Optional[web.Response] = None
     try:
-        # Pass on the registrations to the indexer. The indexer just supports binary as it is
-        # not exposed publically, so we reserialise the hashes.
-        if body_bytes is None:
-            body_bytes = b"".join(pushdata_hashes)
-        response = await mirrored_indexer_call_async(request, body=body_bytes)
+        response = await mirrored_indexer_call_async(request, body=body_bytes,
+            query_params={ "account_id": str(account_id) })
     finally:
         if response is not None and response.status == http.HTTPStatus.OK:
             # The indexer applies the deregistrations successfully so we can update our state too.
@@ -382,11 +445,13 @@ async def indexer_post_output_spend_notifications(request: web.Request) -> web.R
     if not len(client_outpoints):
         raise web.HTTPBadRequest(reason="no outpoints provided")
 
-    # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
-    #     access the server as if we were doing so with an account. This should be removed
-    #     when we have proper account usage in ESV.
-    assert app_state.temporary_account_id is not None
-    account_id = app_state.temporary_account_id
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPUnauthorized()
+    api_key = auth_string[7:]
+    account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized()
 
     websocket_state = app_state.get_websocket_state_for_account_id(account_id)
     if websocket_state is None:

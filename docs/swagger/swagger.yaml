@@ -812,6 +812,51 @@ paths:
         '400':
           description: Invalid API key type or empty request body.
 
+  /api/v1/indexer:
+    get:
+      summary: Get indexer settings for the account associated with the bearer token.
+      security:
+        - BearerAuth: [ ]
+      tags:
+        - Indexer
+      responses:
+        '200':
+          description: Success. Returns the current indexer settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexerSettingsJSON"
+        '400':
+          description: Invalid API key type or empty request body.
+        '404':
+          description: No stored settings for your account.
+        '503':
+          description: Indexer services are currently inaccessible.
+    post:
+      tags:
+      - Indexer
+      summary: "Update the specific provided indexer settings and return the full current set."
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: "The outpoints to look for usage of."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IndexerSettingsJSON"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexerSettingsJSON"
+        '400':
+          description: Invalid API key type or empty request body.
+        '503':
+          description: Indexer services are currently inaccessible.
+
   /api/v1/transaction/{txid}:
     parameters:
       - name: txid
@@ -1217,3 +1262,8 @@ components:
         description: >-
           The first item in the array MUST be an string representing the canonically hex-encoded transaction id,
           and the second item MUST be a integer representing the index of the transaction output.
+    IndexerSettingsJSON:
+      type: object
+      properties:
+        tipFilterCallbackUrl:
+          type: string

@@ -3,6 +3,14 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 
+try:
+    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
+    import pysqlite3 as sqlite3
+except ModuleNotFoundError:
+    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
+    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
+    import sqlite3  # type: ignore
+
 import asyncio
 from collections import defaultdict
 import json
@@ -68,10 +76,18 @@ class ApplicationState(object):
 
         self.network = network
 
-        self.database_context = DatabaseContext(str(datastore_location), write_warn_ms=10)
-        self.database_context.run_in_thread(sqlite_db.setup)
+        def _setup_database(db: Optional[sqlite3.Connection]=None) -> None:
+            if int(os.getenv('REFERENCE_SERVER_RESET', "0")):
+                self.logger.info("Dropping database tables")
+                self.msg_box_repository.drop_tables(db)
+                sqlite_db.delete_all_tables(db)
+            self.logger.info("Creating any missing database tables")
+            sqlite_db.setup(db)
+            self.msg_box_repository.create_tables(db)
 
+        self.database_context = DatabaseContext(str(datastore_location), write_warn_ms=10)
         self.msg_box_repository = MsgBoxSQLiteRepository(self.database_context)
+        self.database_context.run_in_thread(_setup_database)
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
         self.aiohttp_session: Optional[aiohttp.ClientSession] = None
@@ -81,11 +97,6 @@ class ApplicationState(object):
         self.indexer_url = os.getenv('INDEXER_URL')
         self.indexer_is_connected = False
         self._output_spend_counts: dict[Outpoint, int] = defaultdict(int)
-
-        # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
-        #     access the server as if we were doing so with an account. This should be removed
-        #     when we have proper account usage in ESV.
-        self.temporary_account_id: Optional[int] = None
 
     def start_tasks(self) -> None:
         asyncio.create_task(self._account_notifications_task())
@@ -230,24 +241,25 @@ class ApplicationState(object):
         """Emits any notifications from the queue to all connected websockets"""
         try:
             notification: PushNotification
-            msg_box_api_token_id: int
             ws_client: MsgBoxWSClient
             while self.is_alive:
                 try:
                     msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
-                    self.logger.debug("Got peer channel notification for channel_id: %s",
-                        msg_box_api_token_id)
                 except Exception as e:
                     logger.exception(e)
                     continue
 
+                msg_box = notification['msg_box']
+                self.logger.debug("Got peer channel notification for channel_id: %s",
+                    msg_box.id)
+
                 if not len(self.get_msg_box_ws_clients()):
+                    self.logger.debug("No connected web sockets")
                     continue
 
                 # Send new message notifications to the relevant (and authenticated)
                 # websocket client (based on msg_box_id)
                 # Todo - key: value cache to lookup the relevant client
-                msg_box = notification['msg_box']
                 ws_clients = self.get_msg_box_ws_clients_by_channel_id(msg_box.id)
                 for ws_client in ws_clients:
                     self.logger.debug("Sending msg to ws_id: %s", ws_client.ws_id)
@@ -315,40 +327,41 @@ class ApplicationState(object):
         """
         Serialise and send outgoing account-related notifications.
         """
-        while self.is_alive:
-            account_id, message_kind, payload = await self.account_message_queue.get()
-            self.logger.debug("Got account notification, account_id=%d", account_id)
+        try:
+            while self.is_alive:
+                account_id, message_kind, payload = await self.account_message_queue.get()
+                self.logger.debug("Got account notification, account_id=%d", account_id)
 
-            websocket_state = self.get_websocket_state_for_account_id(account_id)
-            if websocket_state is None:
-                self.logger.debug(
-                    "No websocket, dropped message, message_kind=%s, account_id=%d",
-                    message_kind, account_id)
-                continue
-
-            if websocket_state.accept_type == "application/json":
-                message_kind_name = ACCOUNT_MESSAGE_NAMES[message_kind]
-                # TODO(1.4.0) JSON support. We might consider unpacking this for JSON into
-                #     some dictionary structure rather than just giving them the hex.
-                if isinstance(payload, bytes): # spent output notification
-                    payload = payload.hex()
-                json_object = GeneralNotification(message_type=message_kind_name, result=payload)
-                try:
-                    await websocket_state.websocket.send_str(data=json.dumps(json_object))
-                except ConnectionResetError:
+                websocket_state = self.get_websocket_state_for_account_id(account_id)
+                if websocket_state is None:
                     self.logger.debug(
-                        "Dropped message for disconnected text websocket, message_kind=%s, "
-                        "account_id=%d", message_kind, account_id)
-            else:
-                message_bytes = pack_account_message_bytes(message_kind, payload)
-                try:
-                    await websocket_state.websocket.send_bytes(data=message_bytes)
-                except ConnectionResetError:
-                    self.logger.debug(
-                        "Dropped message for disconnected binary websocket, message_kind=%s, "
-                        "account_id=%d", message_kind, account_id)
+                        "No websocket, dropped message, message_kind=%s, account_id=%d",
+                        message_kind, account_id)
+                    continue
 
-        self.logger.info("exiting push notifications thread")
+                if websocket_state.accept_type == "application/json":
+                    message_kind_name = ACCOUNT_MESSAGE_NAMES[message_kind]
+                    # TODO(1.4.0) JSON support. We might consider unpacking this for JSON into
+                    #     some dictionary structure rather than just giving them the hex.
+                    if isinstance(payload, bytes): # spent output notification
+                        payload = payload.hex()
+                    json_object = GeneralNotification(message_type=message_kind_name, result=payload)
+                    try:
+                        await websocket_state.websocket.send_str(data=json.dumps(json_object))
+                    except ConnectionResetError:
+                        self.logger.debug(
+                            "Dropped message for disconnected text websocket, message_kind=%s, "
+                            "account_id=%d", message_kind, account_id)
+                else:
+                    message_bytes = pack_account_message_bytes(message_kind, payload)
+                    try:
+                        await websocket_state.websocket.send_bytes(data=message_bytes)
+                    except ConnectionResetError:
+                        self.logger.debug(
+                            "Dropped message for disconnected binary websocket, message_kind=%s, "
+                            "account_id=%d", message_kind, account_id)
+        finally:
+            self.logger.info("exiting push notifications thread")
 
 
 async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
@@ -374,22 +387,6 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
     app_state = ApplicationState(app, network, datastore_location, host, port)
 
     if network == network.REGTEST:
-        # TODO(temporary-prototype-choice) Allow regtest key override or fallback to these?
-        REGTEST_VALID_ACCOUNT_TOKEN = os.getenv('REGTEST_VALID_ACCOUNT_TOKEN',
-                                                "t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0_xa"
-                                                "CbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==")
-        REGTEST_CLIENT_PRIVATE_KEY = os.getenv('REGTEST_CLIENT_PRIVATE_KEY',
-                                               '720f1987db69efa562b3dabd78e51f19'
-                                               'bd8da76c70ad839b72b939f4071b144b')
-        client_priv_key = bitcoinx.PrivateKey.from_hex(REGTEST_CLIENT_PRIVATE_KEY)
-        client_pub_key: bitcoinx.PublicKey = client_priv_key.public_key
-        account_id, api_key = app_state.database_context.run_in_thread(sqlite_db.create_account,
-            client_pub_key.to_bytes(), forced_api_key=REGTEST_VALID_ACCOUNT_TOKEN)
-        logger.debug("Got RegTest account_id: %s, api_key: %s", account_id, api_key)
-        # TODO(1.4.0) Accounts. Until we have free quota accounts we need a way to
-        #     access the server as if we were doing so with an account. This should be removed
-        #     when we have proper account usage in ESV.
-        app_state.temporary_account_id = account_id
         app_state.server_keys = create_regtest_server_keys()
     else:
         # TODO(temporary-prototype-choice) Have some way of finding the non-regtest keys.
@@ -460,22 +457,31 @@ def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERV
 
     if os.getenv("EXPOSE_INDEXER_APIS") == "1":
         app.add_routes([
-            web.post("/api/v1/restoration/search",
-                handlers_indexer.indexer_post_restoration_search),
-            web.get("/api/v1/transaction/{txid}",
-                handlers_indexer.indexer_get_transaction),
-            web.get("/api/v1/merkle-proof/{txid}",
-                handlers_indexer.indexer_get_merkle_proof),
-            web.post("/api/v1/output-spend",
-                handlers_indexer.indexer_post_output_spends),
-            web.post("/api/v1/output-spend/notifications",
-                handlers_indexer.indexer_post_output_spend_notifications),
+            web.get("/api/v1/indexer",
+                handlers_indexer.indexer_get_indexer_settings),
+            web.post("/api/v1/indexer",
+                handlers_indexer.indexer_post_indexer_settings),
+            # These need to be registered before "get transaction" to avoid clashes.
             web.get("/api/v1/transaction/filter",
                 handlers_indexer.indexer_get_transaction_filter),
             web.post("/api/v1/transaction/filter",
                 handlers_indexer.indexer_post_transaction_filter),
             web.post("/api/v1/transaction/filter:delete",
                 handlers_indexer.indexer_post_transaction_filter_delete),
+            # TODO(1.4.0) Technical debt. We can enforce txid with {txid:[a-fA-F0-9]{64}} in theory.
+            web.get("/api/v1/transaction/{txid}",
+                handlers_indexer.indexer_get_transaction),
+
+            # TODO(1.4.0) Technical debt. We can enforce txid with {txid:[a-fA-F0-9]{64}} in theory.
+            web.get("/api/v1/merkle-proof/{txid}",
+                handlers_indexer.indexer_get_merkle_proof),
+            web.post("/api/v1/restoration/search",
+                handlers_indexer.indexer_post_restoration_search),
+
+            web.post("/api/v1/output-spend",
+                handlers_indexer.indexer_post_output_spends),
+            web.post("/api/v1/output-spend/notifications",
+                handlers_indexer.indexer_post_output_spend_notifications),
         ])
 
     return app, host, port

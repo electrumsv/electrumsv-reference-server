@@ -74,8 +74,7 @@ async def get_account(request: web.Request) -> web.Response:
     if account_id is None or account_flags & AccountFlags.DISABLED_MASK:
         raise web.HTTPUnauthorized
 
-    metadata = await app_state.database_context.run_in_thread_async(
-        get_account_metadata_for_account_id, account_id)
+    metadata = get_account_metadata_for_account_id(app_state.database_context, account_id)
     # This should never happen but we error if it does.
     assert metadata.public_key_bytes != b""
     data = {
@@ -149,8 +148,7 @@ async def post_account_key(request: web.Request) -> web.Response:
                 create_account, account_public_key_bytes)
             payment_key_index = 1
         else:
-            metadata = await app_state.database_context.run_in_thread_async(
-                    get_account_metadata_for_account_id, account_id)
+            metadata = get_account_metadata_for_account_id(app_state.database_context, account_id)
             if metadata.flags & AccountFlags.MID_CREATION:
                 # This is a user with an account in the process of being created, and the required
                 # action is that they fund it. If they request a fresh payment key they are

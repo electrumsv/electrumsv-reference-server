@@ -4,13 +4,13 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 
 from __future__ import annotations
-
 from dataclasses import asdict
 from datetime import datetime, timedelta
+from http import HTTPStatus
 from json import JSONDecodeError
 import logging
 import os
-from typing import TYPE_CHECKING, Optional, Union
+from typing import cast, TYPE_CHECKING, Optional, Union
 import uuid
 
 import aiohttp
@@ -20,11 +20,13 @@ from aiohttp.web_ws import WebSocketResponse
 from ..constants import AccountMessageKind
 from .. import errors
 from ..errors import Error
-from .models import MsgBox, Message
-from .repositories import MsgBoxSQLiteRepository
+from .. import sqlite_db
 from ..types import AccountMessage, ChannelNotification, MsgBoxWSClient, \
     PushNotification
-from ..utils import _try_read_bearer_token, _auth_ok, _try_read_bearer_token_from_query
+from ..utils import _try_read_bearer_token, _try_read_bearer_token_from_query
+
+from .models import Message, MsgBox, MsgBoxAPIToken
+from .repositories import MsgBoxSQLiteRepository
 from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate, MessageViewModelGetJSON, \
     MessageViewModelGetBinary
@@ -38,23 +40,27 @@ logger = logging.getLogger('handlers-peer-channels')
 
 def _auth_for_channel_token(request: web.Request,
         handler_name: str, token: str, external_id: str,
-        msg_box_repository: MsgBoxSQLiteRepository) -> bool:
-    token_object = msg_box_repository.get_api_token(token)
-    if not token_object:
+        msg_box_repository: MsgBoxSQLiteRepository) -> tuple[int, MsgBoxAPIToken]:
+    token_row = msg_box_repository.get_api_token(token)
+    if token_row is None:
         raise web.HTTPUnauthorized()
 
-    if token_object.valid_to and datetime.utcnow() > token_object.valid_to:
+    if token_row.valid_to and datetime.utcnow() > token_row.valid_to:
         raise web.HTTPUnauthorized(reason="token expired")
 
     if (request.method.lower() == 'post'
-            and (handler_name == 'mark_message_read_or_unread' and not token_object.can_read
-                 or handler_name != 'mark_message_read_or_unread' and not token_object.can_write)
-        or (request.method.lower() == 'delete' and not token_object.can_write)
+            and (handler_name == 'mark_message_read_or_unread' and not token_row.can_read
+                 or handler_name != 'mark_message_read_or_unread' and not token_row.can_write)
+        or (request.method.lower() == 'delete' and not token_row.can_write)
         or ((request.method.lower() == 'get' or request.method.lower() == 'head')
-            and not token_object.can_read)):
+            and not token_row.can_read)):
         raise web.HTTPUnauthorized()
-    logger.debug("Request was authenticated as API token: %s", token)
-    return msg_box_repository.is_authorized_to_msg_box_api_token(external_id, token_object.id)
+    logger.debug("Checking per-channel API token authentication: %s", token)
+    internal_message_box_id = msg_box_repository.get_api_token_authorization_data_for_msg_box(
+        external_id, token_row.id)
+    if internal_message_box_id is None:
+        raise web.HTTPUnauthorized()
+    return internal_message_box_id, token_row
 
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
@@ -74,14 +80,11 @@ async def list_channels(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, app_state.database_context):
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
         raise web.HTTPUnauthorized
 
-    # Todo - get the account_id from db and return HTTPNotFound if not found
-    # Todo - check the account_id against the channel_id to ensure this user
-    #  has the required read/write permissions
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
     logger.info("Get list of message boxes for accountid: %s", account_id)
 
     msg_boxes: list[MsgBox] = msg_box_repository.get_msg_boxes(account_id)
@@ -102,14 +105,13 @@ async def get_single_channel_details(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, app_state.database_context):
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
         raise web.HTTPUnauthorized
 
-    # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
     external_id = request.match_info['channelid']
 
     logger.info("Get message box by external_id %s for account(id) %s", external_id, account_id)
@@ -131,14 +133,14 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
             return web.Response(reason=errors.NoBearerToken.reason,
                                 status=errors.NoBearerToken.status)
 
-        if not _auth_ok(api_key, app_state.database_context):
+        account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+            app_state.database_context, api_key)
+        if account_id is None:
             raise web.HTTPUnauthorized
 
         # Todo - get the account_id from db and return HTTPNotFound if not found
         # Todo - check the account_id against the channel_id to ensure this user
         #  has the required read/write permissions
-        account_id = app_state.temporary_account_id
-        assert account_id is not None
         external_id = request.match_info['channelid']
         body = await request.json()
         _msg_box_view_amend = MsgBoxViewModelAmend(public_read=body['public_read'],
@@ -167,13 +169,14 @@ async def delete_channel(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, app_state.database_context):
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = app_state.temporary_account_id
     assert account_id is not None
     external_id = request.match_info['channelid']
 
@@ -196,14 +199,14 @@ async def create_new_channel(request: web.Request) -> web.Response:
             return web.Response(reason=errors.NoBearerToken.reason,
                                 status=errors.NoBearerToken.status)
 
-        if not _auth_ok(api_key, app_state.database_context):
+        account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+            app_state.database_context, api_key)
+        if account_id is None:
             raise web.HTTPUnauthorized
 
         # Todo - get the account_id from db and return HTTPNotFound if not found
         # Todo - check the account_id against the channel_id to ensure this user
         #  has the required read/write permissions
-        account_id = app_state.temporary_account_id
-        assert account_id is not None
 
         logger.info("Creating new message box for account_id: %s", account_id)
         body = await request.json()
@@ -234,14 +237,14 @@ async def revoke_selected_token(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, app_state.database_context):
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
     _external_id = request.match_info.get('channelid')
     token_id = request.match_info['tokenid']
     msg_box_repository.delete_api_token(int(token_id))
@@ -257,14 +260,14 @@ async def get_token_details(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, app_state.database_context):
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
     _external_id = request.match_info['channelid']
     token_id = request.match_info['tokenid']
 
@@ -283,14 +286,14 @@ async def get_list_of_tokens(request: web.Request) -> web.Response:
         return web.Response(reason=errors.NoBearerToken.reason,
                             status=errors.NoBearerToken.status)
 
-    if not _auth_ok(api_key, app_state.database_context):
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
         raise web.HTTPUnauthorized
 
     # Todo - get the account_id from db and return HTTPNotFound if not found
     # Todo - check the account_id against the channel_id to ensure this user
     #  has the required read/write permissions
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
     external_id = request.match_info['channelid']
     token = request.query.get('token')
 
@@ -301,42 +304,38 @@ async def get_list_of_tokens(request: web.Request) -> web.Response:
 
 
 async def create_new_token_for_channel(request: web.Request) -> web.Response:
+    app_state: ApplicationState = request.app['app_state']
+    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
+
+    api_key = _try_read_bearer_token(request)
+    if not api_key:
+        return web.Response(reason=errors.NoBearerToken.reason,
+                            status=errors.NoBearerToken.status)
+
+    account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
+        app_state.database_context, api_key)
+    if account_id is None:
+        raise web.HTTPUnauthorized
+
+    external_id = request.match_info['channelid']
+
+    msg_box = msg_box_repository.get_msg_box(account_id, external_id)
+    if msg_box is None:
+        raise web.HTTPNotFound
+
     try:
-        app_state: ApplicationState = request.app['app_state']
-        msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-
-        api_key = _try_read_bearer_token(request)
-        if not api_key:
-            return web.Response(reason=errors.NoBearerToken.reason,
-                                status=errors.NoBearerToken.status)
-
-        if not _auth_ok(api_key, app_state.database_context):
-            raise web.HTTPUnauthorized
-
-        # Todo - get the account_id from db and return HTTPNotFound if not found
-        # Todo - check the account_id against the channel_id to ensure this user
-        #  has the required read/write permissions
-        account_id = app_state.temporary_account_id
-        assert account_id is not None
-        external_id = request.match_info['channelid']
-
-        msg_box = msg_box_repository.get_msg_box(account_id, external_id)
-        if not msg_box:
-            raise web.HTTPNotFound
-
         body = await request.json()
-        api_token_view_model_create = APITokenViewModelCreate(**body)
-        api_token_view_model_get = msg_box_repository.create_api_token(api_token_view_model_create,
-            msg_box.id, account_id)
+    except JSONDecodeError:
+        logger.exception("failed getting json from request")
+        return web.Response(reason="bad request body, invalid JSON", status=400)
 
-        if not api_token_view_model_get:
-            raise web.HTTPNotFound()
+    api_token_view_model_create = APITokenViewModelCreate(**body)
+    api_token_view_model_get = msg_box_repository.create_api_token(api_token_view_model_create,
+        msg_box.id, account_id)
+    if api_token_view_model_get is None:
+        raise web.HTTPNotFound()
 
-        return web.json_response(asdict(api_token_view_model_get))
-
-    except JSONDecodeError as e:
-        logger.exception(e)
-        return web.Response(reason="JSONDecodeError: " + str(e), status=400)
+    return web.json_response(asdict(api_token_view_model_get))
 
 
 # ----- MESSAGE MANAGEMENT APIs ----- #
@@ -344,24 +343,30 @@ async def write_message(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
 
-    # Todo - get the account_id from db and return HTTPNotFound if not found
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
     external_id = request.match_info.get('channelid')
     if not external_id:
         raise web.HTTPNotFound(reason="channel id wasn't provided")
+    # Todo - get the account_id from db and return HTTPNotFound if not found
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPBadRequest()
 
-    # Note this bearer token is the channel-specific one
-    msg_box_api_token = _try_read_bearer_token(request)  # or can be the account master bearer token
-    if not msg_box_api_token:
-        return web.Response(reason=errors.NoBearerToken.reason,
-                            status=errors.NoBearerToken.status)
-
-    try:
-        _auth_for_channel_token(request, 'write_message',
-            msg_box_api_token, external_id, msg_box_repository)
-    except web.HTTPException as e:
-        raise e
+    api_key = auth_string[7:]
+    # First check the account master api key.
+    # account_id, account_flags = sqlite_db.get_account_id_for_api_key(app_state.database_context,
+    #     api_key)
+    # if account_id is None:
+    if True:
+        # This will raise an unauthorised response exception if the token is invalid for the
+        # given message box represented by `external_id`.
+        internal_message_box_id, api_token_row =_auth_for_channel_token(request,
+            'write_message', api_key, external_id, msg_box_repository)
+        message_box_row = msg_box_repository.get_message_box_by_id(internal_message_box_id)
+        assert message_box_row is not None
+    # else:
+    #     msg_box = msg_box_repository.get_msg_box(account_id, external_id)
+    #     if msg_box is None:
+    #         raise web.HTTPNotFound(reason="peer channel not found")
 
     MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH', '0'))
 
@@ -379,110 +384,120 @@ async def write_message(request: web.Request) -> web.Response:
         return web.Response(reason="Payload Too Large",
                             status=web.HTTPRequestEntityTooLarge.status_code)
 
-    # Retrieve token information from identity
-    msg_box_api_token_object = msg_box_repository.get_api_token(msg_box_api_token)
-    if not msg_box_api_token_object:
-        raise web.HTTPNotFound(reason="peer channel token not found")
-
-    # Retrieve channel data
-    msg_box = msg_box_repository.get_msg_box(account_id, external_id)
-    if not msg_box:
-        raise web.HTTPNotFound(reason="peer channel not found")  # this should never happen
-
     body = await request.read()
 
     # Write message to database
     message = Message(
-        msg_box_id=msg_box.id,
-        msg_box_api_token_id=msg_box_api_token_object.id,
+        msg_box_id=message_box_row.id,
+        msg_box_api_token_id=api_token_row.id,
         content_type=request.content_type,
         payload=body,
         received_ts=datetime.utcnow()
     )
     try:
-        result = msg_box_repository.write_message(message)
+        message_id, msg_box_get_view = msg_box_repository.write_message(message)
     except Error as e:
         return web.Response(reason=e.reason, status=e.status)
 
-    if isinstance(result, Error):
-        return web.Response(reason=result.reason, status=result.status)
-    # else result:
-    message_id, msg_box_get_view = result
     logger.info("Message %s from api_token_id: %s written to channel %s", message_id,
-        msg_box_api_token_object.id, external_id)
+        api_token_row.id, external_id)
 
     # Send push notification
     notification_new_message_text = os.getenv('NOTIFICATION_TEXT_NEW_MESSAGE',
                                               'New message arrived')
     notification = PushNotification(
-        msg_box=msg_box,
+        msg_box=message_box_row,
         notification=notification_new_message_text,
     )
     # Per-Channel reference API
-    app_state.msg_box_new_msg_queue.put_nowait((msg_box_api_token_object.id, notification))
+    app_state.msg_box_new_msg_queue.put_nowait((api_token_row.id, notification))
 
     # General-Purpose websocket
-    msg_box = notification['msg_box']
-    channel_msg = ChannelNotification(id=msg_box.external_id,
+    channel_msg = ChannelNotification(id=message_box_row.external_id,
         notification=notification['notification'])
-    app_state.account_message_queue.put_nowait(AccountMessage(account_id,
+    app_state.account_message_queue.put_nowait(AccountMessage(message_box_row.account_id,
         AccountMessageKind.PEER_CHANNEL_MESSAGE, channel_msg))
 
     return web.json_response(msg_box_get_view.to_dict())
-
-
-def _get_messages_head(external_id: str, msg_box_api_token: str,
-        msg_box_repository: MsgBoxSQLiteRepository) -> None:
-    logger.debug("Head called for msg_box: %s", external_id)
-
-    seq = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
-    if seq is None:
-        raise web.HTTPNotFound()
-
-    max_sequence = str(seq)
-
-    logger.debug("Head message sequence of msg_box: %s is %s", external_id, max_sequence)
-    response_headers = {}
-    response_headers.update({'User-Agent': 'ESV-Ref-Server'})
-    response_headers.update({'Access-Control-Expose-Headers': 'authorization,etag'})
-    response_headers.update({'ETag': str(max_sequence)})
-    raise web.HTTPOk(headers=response_headers)
-
-
-def _get_messages(channelid: str, api_token_id: int,
-        onlyunread: bool, accept_type: str, msg_box_repository: MsgBoxSQLiteRepository) \
-            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
-                     dict[str, str]]:
-    logger.info("Get messages for channel_id: %s", channelid)
-    # Todo - use a generator here and sequentially write the messages out to a streamed response
-    result = msg_box_repository.get_messages(api_token_id, onlyunread)
-    if result is None:
-        raise web.HTTPNotFound(reason="messages not found or not sequenced")
-
-    message_list, max_sequence = result
-    logger.info("Returning %d messages for channel: %s", len(message_list), channelid)
-    if accept_type == 'application/octet-stream':
-        raise web.HTTPNotImplemented()
-    else:
-        response_headers = {}
-        response_headers.update({'User-Agent': 'ESV-Ref-Server'})
-        response_headers.update({'Access-Control-Expose-Headers': 'authorization,etag'})
-        response_headers.update({'ETag': str(max_sequence)})
-        return message_list, response_headers
 
 
 async def get_messages(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
     accept_type = request.headers.get('Accept', 'application/json')
+    if accept_type not in ('application/json', "*/*"):
+        raise web.HTTPBadRequest(reason=f"unsupported accept mime type '{accept_type}'")
 
     external_id = request.match_info.get('channelid')
+    if external_id is None:
+        raise web.HTTPNotFound(reason="channel id wasn't provided")
+
     onlyunread = False
-    if request.query.get('unread', False) is True:
+    if request.query.get('unread', "false") == "true":
         onlyunread = True
 
+    # Note this bearer token is the channel-specific one
+    msg_box_api_token = _try_read_bearer_token(request)
+    if msg_box_api_token is None:
+        return web.Response(reason=errors.NoBearerToken.reason,
+                            status=errors.NoBearerToken.status)
+
+    _auth_for_channel_token(request, 'get_messages', msg_box_api_token, external_id,
+        msg_box_repository)
+
+    if request.method == 'HEAD':
+        logger.debug("Head called for msg_box: %s", external_id)
+
+        max_sequence = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
+        if max_sequence is None:
+            raise web.HTTPNotFound()
+
+        logger.debug("Head max sequence of msg_box: %s is %s", external_id, max_sequence)
+        response_headers = {
+            'User-Agent': 'ESV-Ref-Server',
+            'Access-Control-Expose-Headers': 'authorization,etag',
+            'ETag': str(max_sequence),
+        }
+        return web.Response(headers=response_headers)
+
+    assert request.method == 'GET'
+
+    msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
+    if not msg_box_api_token:
+        raise web.HTTPNotFound(reason="peer channel token not found")
+
+    assert msg_box_api_token_obj is not None
+    logger.info("Get messages for channel_id: %s", external_id)
+    # Todo - use a generator here and sequentially write the messages out to a streamed response
+    result = msg_box_repository.get_messages(msg_box_api_token_obj.id, onlyunread)
+    if result is None:
+        raise web.HTTPNotFound(reason="messages not found or not sequenced")
+
+    message_list, max_sequence2 = result
+    logger.info("Returning %d messages for channel: %s", len(message_list), external_id)
+
+    response_headers = {
+        'User-Agent': 'ESV-Ref-Server',
+        'Access-Control-Expose-Headers': 'authorization,etag',
+        'ETag': str(max_sequence2),
+    }
+    return web.json_response(message_list, headers=response_headers)
+
+
+
+async def mark_message_read_or_unread(request: web.Request) -> web.Response:
+    app_state: ApplicationState = request.app['app_state']
+    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
+
+    external_id = request.match_info.get('channelid')
     if not external_id:
-        return web.Response(reason="channel id wasn't provided", status=404)
+        raise web.HTTPNotFound(reason="channel id wasn't provided")
+
+    sequence = request.match_info.get('sequence')
+    if not sequence:
+        raise web.HTTPNotFound(reason="sequence number of message wasn't provided")
+
+    older = request.query.get('older', "false") == "true"  # optional - marks all older messages
 
     # Note this bearer token is the channel-specific one
     msg_box_api_token = _try_read_bearer_token(request)
@@ -491,74 +506,29 @@ async def get_messages(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'get_messages',
-            msg_box_api_token, external_id, msg_box_repository)
+        _auth_for_channel_token(request,
+            'mark_message_read_or_unread', msg_box_api_token, external_id, msg_box_repository)
     except web.HTTPException as e:
         raise e
 
-    if request.method == 'HEAD':
-        try:
-            _get_messages_head(external_id, msg_box_api_token, msg_box_repository)
-        except (web.HTTPException, web.HTTPOk) as resp:
-            raise resp
-
-    # request.method == 'GET'
-    msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
-    if not msg_box_api_token:
-        raise web.HTTPNotFound(reason="peer channel token not found")
-
-    assert msg_box_api_token_obj is not None
-    message_list, response_headers = _get_messages(external_id, msg_box_api_token_obj.id,
-        onlyunread, accept_type, msg_box_repository)
-    return web.json_response(message_list, status=200, headers=response_headers)
-
-
-
-async def mark_message_read_or_unread(request: web.Request) -> web.Response:
     try:
-        app_state: ApplicationState = request.app['app_state']
-        msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-        accept_type = request.headers.get('Accept', 'application/json')
-
-        external_id = request.match_info.get('channelid')
-        if not external_id:
-            raise web.HTTPNotFound(reason="channel id wasn't provided")
-
-        sequence = request.match_info.get('sequence')
-        if not sequence:
-            raise web.HTTPNotFound(reason="sequence number of message wasn't provided")
-
-        older = bool(request.query.get('older', False))  # optional - marks all older messages
-
-        # Note this bearer token is the channel-specific one
-        msg_box_api_token = _try_read_bearer_token(request)
-        if not msg_box_api_token:
-            return web.Response(reason=errors.NoBearerToken.reason,
-                                status=errors.NoBearerToken.status)
-
-        try:
-            _auth_for_channel_token(request,
-                'mark_message_read_or_unread', msg_box_api_token, external_id, msg_box_repository)
-        except web.HTTPException as e:
-            raise e
-
         body = await request.json()
-        set_read_to = body['read']
-
-        logger.info("Flagging message sequence %s from msg_box %s (older=%s, read=%s)",
-            sequence, external_id, older, set_read_to)
-        msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
-        if msg_box_api_token_obj and \
-                not msg_box_repository.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
-            return web.Response(reason="Sequence not found", status=404)
-
-        assert msg_box_api_token_obj is not None
-        msg_box_repository.mark_messages(
-            external_id, msg_box_api_token_obj.id, int(sequence), older, set_read_to)
-        raise web.HTTPOk()
     except JSONDecodeError as e:
         logger.exception(e)
         return web.Response(reason="JSONDecodeError: " + str(e), status=400)
+
+    set_read_to = cast(bool, body['read'])
+
+    logger.info("Flagging message sequence %s from msg_box %s (older=%s, read=%s)",
+        sequence, external_id, older, set_read_to)
+    msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
+    assert msg_box_api_token_obj is not None
+    if not msg_box_repository.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
+        return web.Response(reason="Sequence not found", status=404)
+
+    msg_box_repository.mark_messages(
+        external_id, msg_box_api_token_obj.id, int(sequence), older, set_read_to)
+    raise web.HTTPOk()
 
 
 async def delete_message(request: web.Request) -> web.Response:
@@ -566,8 +536,10 @@ async def delete_message(request: web.Request) -> web.Response:
     msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
     accept_type = request.headers.get('Accept', 'application/json')
 
-    account_id = app_state.temporary_account_id
-    assert account_id is not None
+    auth_string = request.headers.get('Authorization', None)
+    if auth_string is None or not auth_string.startswith("Bearer "):
+        raise web.HTTPBadRequest()
+
     external_id = request.match_info.get('channelid')
     if not external_id:
         raise web.HTTPNotFound(reason="channel id wasn't provided")
@@ -583,23 +555,20 @@ async def delete_message(request: web.Request) -> web.Response:
                             status=errors.NoBearerToken.status)
 
     try:
-        _auth_for_channel_token(request, 'delete_message',
+        internal_message_box_id, channel_token = _auth_for_channel_token(request, 'delete_message',
             msg_box_api_token, external_id, msg_box_repository)
     except web.HTTPException as e:
         raise e
 
     logger.info("Deleting message sequence: %s in msg_box: %s", sequence, external_id)
-    msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
-    if msg_box_api_token_obj and \
-            not msg_box_repository.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
+    if not msg_box_repository.sequence_exists(channel_token.id, int(sequence)):
         raise web.HTTPNotFound(reason="sequence not found")
 
     message_metadata = msg_box_repository.get_message_metadata(external_id, int(sequence))
     if not message_metadata:
-        logger.error("Message metadata not found for sequence: %s, external_id: %s - likely "
-            "was already deleted", sequence, external_id)
         raise web.HTTPNotFound(reason="message metadata not found - is it deleted already?")
-    msg_box = msg_box_repository.get_msg_box(account_id, external_id)
+
+    msg_box = msg_box_repository.get_message_box_by_id(internal_message_box_id)
     if not msg_box:
         raise web.HTTPNotFound(reason="message box not found")  # this should never happen
 
@@ -624,39 +593,31 @@ class MsgBoxWebSocket(web.View):
         msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
         ws_id = str(uuid.uuid4())
 
-        external_id = self.request.match_info.get('channelid')
-        if not external_id:
+        external_message_box_id = self.request.match_info.get('channelid')
+        if not external_message_box_id:
             raise Error(reason="channel id wasn't provided", status=404)
 
         # Note this bearer token is the channel-specific one
-        msg_box_api_token = _try_read_bearer_token_from_query(self.request)
-        if not msg_box_api_token:
-            raise Error(reason=errors.NoBearerToken.reason,
-                        status=errors.NoBearerToken.status)
+        channel_api_key = self.request.query.get('token', None)
+        if channel_api_key is None:
+            raise Error(reason="Missing 'token' query parameter (requires master bearer token)",
+                status=HTTPStatus.BAD_REQUEST)
 
-        account_id = app_state.temporary_account_id
-        assert account_id is not None
         try:
-            _auth_for_channel_token(self.request, 'MsgBoxWebSocket',
-                msg_box_api_token, external_id, msg_box_repository)
+            internal_message_box_id, channel_token = _auth_for_channel_token(self.request,
+                'MsgBoxWebSocket', channel_api_key, external_message_box_id, msg_box_repository)
         except web.HTTPException as e:
             return web.Response(reason="Unauthorized - Invalid Bearer Token", status=401)
-
-        msg_box_external_id = self.request.match_info.get('channelid')
-        msg_box = msg_box_repository.get_msg_box(account_id, external_id)
-        if not msg_box:
-            return web.Response(reason="peer channel not found for external id: %s" % external_id,
-                status=404)
 
         ws = web.WebSocketResponse()
         await ws.prepare(self.request)
         client = MsgBoxWSClient(
             ws_id=ws_id, websocket=ws,
-            msg_box_internal_id=msg_box.id,
+            msg_box_internal_id=internal_message_box_id,
         )
         app_state.add_msg_box_ws_client(client)
         self.logger.debug('%s connected. host=%s. channel_id=%s',
-            client.ws_id, self.request.host, msg_box_external_id)
+            client.ws_id, self.request.host, external_message_box_id)
 
         try:
             await self._handle_new_connection(client)
