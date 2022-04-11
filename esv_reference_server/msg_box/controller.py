@@ -23,13 +23,12 @@ from ..errors import Error
 from .. import sqlite_db
 from ..types import AccountMessage, ChannelNotification, MsgBoxWSClient, \
     PushNotification
-from ..utils import _try_read_bearer_token, _try_read_bearer_token_from_query
+from ..utils import _try_read_bearer_token
 
 from .models import Message, MsgBox, MsgBoxAPIToken
 from .repositories import MsgBoxSQLiteRepository
 from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
-    MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate, MessageViewModelGetJSON, \
-    MessageViewModelGetBinary
+    MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
 
 if TYPE_CHECKING:
     from ..server import ApplicationState

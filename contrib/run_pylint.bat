@@ -3,4 +3,4 @@
 @rem to python3=3.9"
 set SDKDIR=%~dp0..
 py -m pip install pylint==2.12.2
-py -m pylint --rcfile %SDKDIR%\.pylintrc %SDKDIR%\simple_indexer %SDKDIR%\server.py %SDKDIR%\contrib %SDKDIR%\unittests
+py -m pylint --rcfile %SDKDIR%\.pylintrc %SDKDIR%\simple_indexer %SDKDIR%\server.py %SDKDIR%\contrib %SDKDIR%\unittests %SDKDIR%\esv_reference_server

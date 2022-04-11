@@ -23,7 +23,6 @@ from typing import AsyncIterator, Optional
 
 import aiohttp
 from aiohttp import web
-import bitcoinx
 from electrumsv_database.sqlite import DatabaseContext
 
 from .constants import ACCOUNT_MESSAGE_NAMES, Network, SERVER_HOST, SERVER_PORT
@@ -345,7 +344,8 @@ class ApplicationState(object):
                     #     some dictionary structure rather than just giving them the hex.
                     if isinstance(payload, bytes): # spent output notification
                         payload = payload.hex()
-                    json_object = GeneralNotification(message_type=message_kind_name, result=payload)
+                    json_object = GeneralNotification(message_type=message_kind_name,
+                        result=payload)
                     try:
                         await websocket_state.websocket.send_str(data=json.dumps(json_object))
                     except ConnectionResetError:

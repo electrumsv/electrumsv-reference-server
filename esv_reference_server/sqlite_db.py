@@ -24,7 +24,6 @@ are long running, in which case they should be handed off to a worker thread.
 
 from __future__ import annotations
 import logging
-import os
 try:
     # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
     import pysqlite3 as sqlite3

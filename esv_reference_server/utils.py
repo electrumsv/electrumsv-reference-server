@@ -3,15 +3,11 @@ import base64
 import json
 import os
 import struct
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional
 
 from aiohttp import web
 
 from .constants import AccountMessageKind
-from . import sqlite_db
-
-if TYPE_CHECKING:
-    from electrumsv_database.sqlite import DatabaseContext
 
 
 def create_external_id() -> str:
