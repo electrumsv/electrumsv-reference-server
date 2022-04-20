@@ -17,7 +17,7 @@ from bitcoinx import P2MultiSig_Output, Signature
 
 from .keys import generate_payment_public_key, \
     VerifiableKeyData, verify_key_data
-from .constants import AccountFlags, ChannelState, SERVER_HOST, SERVER_PORT
+from .constants import AccountFlag, ChannelState, EXTERNAL_SERVER_HOST, EXTERNAL_SERVER_PORT
 from . import networks
 from .networks import mapi_broadcast_transaction
 from .payment_channels import BrokenChannelError, InvalidTransactionError, \
@@ -36,7 +36,7 @@ from .sqlite_db import DatabaseStateModifiedError, create_account, create_accoun
 
 if TYPE_CHECKING:
     from .keys import ServerKeys
-    from .server import ApplicationState
+    from .application_state import ApplicationState
 
 
 logger = logging.getLogger('handlers')
@@ -71,7 +71,7 @@ async def get_account(request: web.Request) -> web.Response:
         account_id, account_flags = get_account_id_for_public_key_bytes(app_state.database_context,
             public_key_bytes)
     # We do not reveal if the account does not exist/is disabled or the key data was invalid.
-    if account_id is None or account_flags & AccountFlags.DISABLED_MASK:
+    if account_id is None or account_flags & AccountFlag.DISABLED_MASK:
         raise web.HTTPUnauthorized
 
     metadata = get_account_metadata_for_account_id(app_state.database_context, account_id)
@@ -140,7 +140,7 @@ async def post_account_key(request: web.Request) -> web.Response:
         account_public_key_bytes = bytes.fromhex(key_data["public_key_hex"])
         account_id, account_flags = get_account_id_for_public_key_bytes(app_state.database_context,
             account_public_key_bytes)
-        if account_flags & AccountFlags.DISABLED_MASK:
+        if account_flags & AccountFlag.DISABLED_MASK:
             raise web.HTTPUnauthorized
 
         if account_id is None:
@@ -149,7 +149,7 @@ async def post_account_key(request: web.Request) -> web.Response:
             payment_key_index = 1
         else:
             metadata = get_account_metadata_for_account_id(app_state.database_context, account_id)
-            if metadata.flags & AccountFlags.MID_CREATION:
+            if metadata.flags & AccountFlag.MID_CREATION:
                 # This is a user with an account in the process of being created, and the required
                 # action is that they fund it. If they request a fresh payment key they are
                 # resetting the funding process.
@@ -300,7 +300,7 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
         # messing with the server. They have to have done the signature correctly already
         # in establishing the initial full refund contract.
         await app_state.database_context.run_in_thread_async(deactivate_account, account_id,
-            AccountFlags.DISABLED_FLAGGED)
+            AccountFlag.DISABLED_FLAGGED)
         raise web.HTTPNotAcceptable(reason=exc.args[0])
 
     try:
@@ -311,7 +311,7 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
 
     # If this is the first time the client has given us a payment through the payment channel
     # then we change their account from one that is mid creation to one that is registered.
-    if account_flags & AccountFlags.MID_CREATION:
+    if account_flags & AccountFlag.MID_CREATION:
         try:
             await app_state.database_context.run_in_thread_async(set_account_registered, account_id)
         except DatabaseStateModifiedError:
@@ -441,7 +441,7 @@ async def get_endpoints_data(request: web.Request) -> web.Response:
     data: Dict[str, Any] = {
         "apiType": "bsvapi.endpoint",
         "apiVersion": 1,
-        "baseUrl": f"http://{SERVER_HOST}:{SERVER_PORT}",
+        "baseUrl": f"http://{EXTERNAL_SERVER_HOST}:{EXTERNAL_SERVER_PORT}",
         "timestamp": utc_now_datetime.isoformat() +"Z",
         "expiryTime": utc_expiry_datetime.isoformat() +"Z",
         "endpoints": [

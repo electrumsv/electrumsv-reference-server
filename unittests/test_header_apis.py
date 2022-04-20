@@ -3,14 +3,14 @@ import logging
 from typing import Optional
 
 import aiohttp
+from aiohttp import WSServerHandshakeError
 import pytest
 import requests
 from _pytest.outcomes import Skipped
-from aiohttp import WSServerHandshakeError
 
 from unittests.conftest import _assert_binary_tip_structure_correct, \
     _assert_tip_notification_structure, _assert_tip_structure_correct, REGTEST_GENESIS_BLOCK_HASH, \
-    _successful_call, WS_URL_HEADERS
+    _successful_call, TEST_EXTERNAL_HOST, TEST_EXTERNAL_PORT, WS_URL_HEADERS
 
 
 class TestAiohttpRESTAPI:
@@ -43,7 +43,8 @@ class TestAiohttpRESTAPI:
              'work': 2}
         ]
         query_params = '?height=0'
-        URL = 'http://127.0.0.1:55666/api/v1/headers/by-height' + query_params
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/headers/by-height" + query_params
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_headers_by_height url: %s", URL)
         result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
@@ -64,7 +65,8 @@ class TestAiohttpRESTAPI:
             'transactionCount': 0,
             'work': 2
         }
-        URL = 'http://127.0.0.1:55666/api/v1/headers/{hash}'.format(hash=REGTEST_GENESIS_BLOCK_HASH)
+        URL = "http://{host}:{port}/api/v1/headers/{hash}".format(host=TEST_EXTERNAL_HOST,
+            port=TEST_EXTERNAL_PORT, hash=REGTEST_GENESIS_BLOCK_HASH)
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_header url: %s", URL)
         result: requests.Response = _successful_call(URL, HTTP_METHOD, None)
@@ -80,7 +82,8 @@ class TestAiohttpRESTAPI:
             b';\xa3\xed\xfdz{\x12\xb2z\xc7,>gv\x8fa\x7f\xc8\x1b\xc3\x88\x8aQ2:\x9f\xb8' \
             b'\xaaK\x1e^J\xda\xe5IM\xff\xff\x7f \x02\x00\x00\x00'
 
-        URL = 'http://127.0.0.1:55666/api/v1/headers/{hash}'.format(hash=REGTEST_GENESIS_BLOCK_HASH)
+        URL = "http://{host}:{port}/api/v1/headers/{hash}".format(host=TEST_EXTERNAL_HOST,
+            port=TEST_EXTERNAL_PORT, hash=REGTEST_GENESIS_BLOCK_HASH)
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_header url: %s", URL)
         request_headers = {'Accept': 'application/octet-stream'}
@@ -91,7 +94,8 @@ class TestAiohttpRESTAPI:
 
     def test_get_chain_tips_json(self) -> None:
         query_params = '?longest_chain=1'
-        URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/headers/tips" + query_params
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_chain_tips url: %s", URL)
         result: requests.Response = _successful_call(URL,
@@ -105,7 +109,8 @@ class TestAiohttpRESTAPI:
 
     def test_get_chain_tips_binary(self) -> None:
         query_params = '?longest_chain=1'
-        URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/headers/tips" + query_params
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_chain_tips url: %s", URL)
         request_headers = {'Accept': 'application/octet-stream'}
@@ -151,7 +156,8 @@ class TestAiohttpRESTAPI:
     def test_headers_websocket(self) -> Optional[Skipped]:
         # Skip if HeaderSV APIs unavailable
         query_params = '?longest_chain=1'
-        URL = 'http://127.0.0.1:55666/api/v1/headers/tips' + query_params
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/headers/tips" + query_params
         HTTP_METHOD = 'get'
         self.logger.debug("test_get_chain_tips url: %s", URL)
         result: requests.Response = _successful_call(URL,

@@ -22,7 +22,7 @@ from .constants import AccountMessageKind
 from .types import AccountMessage, Outpoint, outpoint_struct, output_spend_struct, OutputSpend
 
 if TYPE_CHECKING:
-    from .server import ApplicationState
+    from .application_state import ApplicationState
 
 
 logger = logging.getLogger("support-indexer")
@@ -48,7 +48,7 @@ async def unregister_unwanted_spent_outputs(app_state: ApplicationState, account
     #     connection and the old indexer registrations are removed after the new ones are
     #     put in place.
     indexer_url = f"{app_state.indexer_url}/api/v1/output-spend/notifications:unregister"
-    client_session: aiohttp.ClientSession = app_state.app['client_session']
+    client_session = app_state.get_aiohttp_session()
     try:
         async with client_session.post(indexer_url, body=byte_buffer) as response:
             if not response.ok:
@@ -63,21 +63,24 @@ async def unregister_unwanted_spent_outputs(app_state: ApplicationState, account
 
 
 # This task is created and killed by the application state object.
-async def maintain_indexer_connection(app_state: ApplicationState) -> None:
+async def maintain_indexer_connection_async(application_state: ApplicationState) -> None:
     """
     This is intended to be self-encapsulated management of the websocket connection to the
     indexing server. It should recover from errors so that if it can have a connection to the
     indexing server, it should have one.
     """
-    client_session: aiohttp.ClientSession = app_state.app['client_session']
-    websocket_url = f"{app_state.indexer_url}/ws"
+    client_session = application_state.get_aiohttp_session()
+    assert application_state.indexer_url is not None
+    websocket_url = f"{application_state.indexer_url}/ws"
 
     logger.debug("Entering maintain_indexer_connection")
-    while app_state.is_alive:
-        await manage_indexer_websocket(app_state, client_session, websocket_url)
-        logger.debug("Not connected to indexer; waiting for 10 seconds to retry")
-        await asyncio.sleep(10)
-    logger.debug("Exiting maintain_indexer_connection")
+    try:
+        while not application_state._exit_event.is_set():
+            await manage_indexer_websocket(application_state, client_session, websocket_url)
+            logger.debug("Not connected to indexer; waiting for 10 seconds to retry")
+            await asyncio.sleep(10)
+    finally:
+        logger.debug("Exiting maintain_indexer_connection")
 
 
 async def manage_indexer_websocket(app_state: ApplicationState,

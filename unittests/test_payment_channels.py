@@ -43,7 +43,7 @@ from bitcoinx import Bitcoin, Ops, P2PKH_Address, P2PK_Output, P2MultiSig_Output
     PublicKey, Script, SigHash, Tx, TxInput, TxOutput
 import pytest
 
-from esv_reference_server.constants import AccountFlags, ChannelState, \
+from esv_reference_server.constants import AccountFlag, ChannelState, \
     MINIMUM_CHANNEL_PAYMENT_VALUE, MINIMUM_FUNDING_VALUE, SAFE_DUST_VALUE
 from esv_reference_server.keys import create_regtest_server_keys, generate_payment_private_key, \
     generate_payment_public_key, ServerKeys
@@ -176,7 +176,7 @@ def _make_database_rows(*, channel_state: ChannelState,
     db_spent_balance_value = 0
 
     account_metadata = AccountMetadata(PUBLIC_KEY_1.to_bytes(), "api_key", channel_id,
-        AccountFlags.MID_CREATION, 1)
+        AccountFlag.MID_CREATION, 1)
     channel_row = ChannelRow(account_id, channel_id, channel_state,
         db_payment_key_index, db_payment_key_bytes, db_funding_transaction_hash,
         db_funding_output_script_bytes, db_funding_value, db_client_payment_key_bytes,

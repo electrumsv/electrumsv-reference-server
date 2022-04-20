@@ -6,6 +6,18 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import struct
+import sys
+import threading
+from typing import Any, cast, Generator, Optional
+
+import aiohttp
+from aiohttp import WSServerHandshakeError
+from bitcoinx import PublicKey, PrivateKey
+from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
+import pytest
+import requests
+
 try:
     # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
     import pysqlite3 as sqlite3
@@ -13,31 +25,27 @@ except ModuleNotFoundError:
     # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
-import struct
-import sys
-import threading
-import time
-from typing import Any, cast, Generator, Optional
 
-import aiohttp
-from aiohttp import web, WSServerHandshakeError
-from bitcoinx import PublicKey, PrivateKey
-from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
-import pytest
-import requests
-
+from esv_reference_server.application_state import ApplicationState
 from esv_reference_server.constants import DEFAULT_DATABASE_NAME
 from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server.sqlite_db import delete_all_tables
 
+from server import main as application_main
 
-from server import AiohttpServer, logger, get_app
 
-TEST_HOST = "127.0.0.1"
-TEST_PORT = 55666
-WS_URL_GENERAL = f"ws://localhost:{TEST_PORT}/api/v1/web-socket"
-WS_URL_HEADERS = f"ws://localhost:{TEST_PORT}/api/v1/headers/tips/websocket"
-WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:55666/api/v1/channel/{channelid}/notify"
+logger = logging.getLogger("unittest")
+
+
+TEST_EXTERNAL_HOST = "127.0.0.1"
+TEST_EXTERNAL_PORT = 55666
+TEST_INTERNAL_HOST = "127.0.0.1"
+TEST_INTERNAL_PORT = 55668
+
+WS_URL_GENERAL = f"ws://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/web-socket"
+WS_URL_HEADERS = f"ws://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/headers/tips/websocket"
+WS_URL_TEMPLATE_MSG_BOX = "ws://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+    "/api/v1/channel/{channelid}/notify"
 
 REGTEST_GENESIS_BLOCK_HASH = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
 PRIVATE_KEY_1 = PrivateKey.from_hex(
@@ -57,22 +65,11 @@ CHANNEL_READ_ONLY_TOKEN: str = ""
 CHANNEL_READ_ONLY_TOKEN_ID: int = 0
 
 
-app_reference: Optional[web.Application] = None
 
-
-async def main(app: web.Application, host: str, port: int) -> None:
-    server = AiohttpServer(app, host, port)
-    try:
-        await server.start()
-    finally:
-        await server.stop()
-
-
-def electrumsv_reference_server_thread(app: web.Application, host: str = TEST_HOST,
-        port: int = TEST_PORT) -> None:
+def electrumsv_reference_server_thread() -> None:
     """Launches the ESV-Reference-Server to run in the background but with a test database"""
     try:
-        asyncio.run(main(app, host, port))
+        asyncio.run(application_main())
         sys.exit(0)
     except KeyboardInterrupt:
         logger.debug("ElectrumSV Reference Server stopped")
@@ -220,15 +217,21 @@ def _is_server_running(url: str) -> bool:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def run_server() -> Generator[web.Application, None, None]:
-    global app_reference
+def run_server() -> Generator[ApplicationState, None, None]:
     data_path = MODULE_DIR / "localdata"
     if data_path.exists():
         shutil.rmtree(data_path)
     data_path.mkdir()
 
+    os.environ['EXTERNAL_HOST'] = TEST_EXTERNAL_HOST
+    os.environ['EXTERNAL_PORT'] = str(TEST_EXTERNAL_PORT)
+    os.environ['INTERNAL_HOST'] = TEST_INTERNAL_HOST
+    os.environ['INTERNAL_PORT'] = str(TEST_INTERNAL_PORT)
+    os.environ['NETWORK'] = "regtest"
     os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
     os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
+    os.environ['EXPOSE_INDEXER_APIS'] = '0'
+    os.environ['INDEXER_URL'] = 'http://127.0.0.1:49241'
     os.environ['SKIP_DOTENV_FILE'] = '1'
     os.environ['REFERENCE_SERVER_RESET'] = '0'
     os.environ['REFERENCE_SERVER_DATA_PATH'] = str(data_path)
@@ -244,16 +247,13 @@ def run_server() -> Generator[web.Application, None, None]:
     execute_with_context(database_context)
     database_context.close()
 
-    app, host, port = get_app(TEST_HOST, TEST_PORT)
-    app_reference = app
-    try:
-        thread = threading.Thread(target=electrumsv_reference_server_thread,
-                                args=(app, host, port),
-                                daemon=True)
-        thread.start()
-        time.sleep(3)
-        yield app
-    finally:
-        app_reference = None
+    thread = threading.Thread(target=electrumsv_reference_server_thread, args=(), daemon=True)
+    thread.start()
 
-    # Teardown logic here...
+    if not ApplicationState.singleton_event.wait(10.0):
+        raise Exception("Application startup timed out")
+
+    assert ApplicationState.singleton_reference is not None
+    application_state = ApplicationState.singleton_reference()
+    assert application_state is not None
+    yield application_state

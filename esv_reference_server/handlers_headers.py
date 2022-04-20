@@ -14,19 +14,19 @@ from esv_reference_server.errors import Error
 from esv_reference_server.types import HeadersWSClient, HeaderSVTip
 
 if typing.TYPE_CHECKING:
-    from esv_reference_server.server import ApplicationState
+    from esv_reference_server.application_state import ApplicationState
 
 logger = logging.getLogger('handlers-headers')
 
 
 async def get_header(request: web.Request) -> web.Response:
-    client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
+    client_session = app_state.get_aiohttp_session()
 
     accept_type = request.headers.get('Accept', 'application/json')
     blockhash = request.match_info.get('hash')
     if not blockhash:
-        return web.HTTPBadRequest(reason="'hash' path parameter not supplied")
+        raise web.HTTPBadRequest(reason="'hash' path parameter not supplied")
 
     try:
         url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{blockhash}"
@@ -34,9 +34,8 @@ async def get_header(request: web.Request) -> web.Response:
             request_headers = {'Accept': 'application/octet-stream'}
             async with client_session.get(url_to_fetch, headers=request_headers) as response:
                 result = await response.read()
-
             if not result:
-                return web.HTTPNotFound()
+                raise web.HTTPNotFound()
             response_headers = {'Content-Type': 'application/octet-stream',
                                 'User-Agent': 'ESV-Ref-Server'}
             return web.Response(body=result, status=200, reason='OK', headers=response_headers)
@@ -56,8 +55,8 @@ async def get_header(request: web.Request) -> web.Response:
 
 
 async def get_headers_by_height(request: web.Request) -> web.Response:
-    client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
+    client_session = app_state.get_aiohttp_session()
 
     accept_type = request.headers.get('Accept', 'application/json')
     params = request.rel_url.query
@@ -108,8 +107,8 @@ def _convert_json_tips_to_binary(result: List[HeaderSVTip]) -> bytearray:
 
 
 async def get_chain_tips(request: web.Request) -> web.Response:
-    client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
+    client_session = app_state.get_aiohttp_session()
     accept_type = request.headers.get('Accept', 'application/json')
 
     params = request.rel_url.query

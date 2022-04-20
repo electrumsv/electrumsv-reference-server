@@ -128,3 +128,8 @@ class TipFilterListEntry(NamedTuple):
     def __repr__(self) -> str:
         return f"TipFilterListEntry({self.pushdata_hash.hex()}, {self.date_created}, " \
             f"{self.duration_seconds})"
+
+class AccountIndexerMetadata(NamedTuple):
+    account_id: int
+    tip_filter_callback_url: Optional[str]
+    tip_filter_callback_token: Optional[str]

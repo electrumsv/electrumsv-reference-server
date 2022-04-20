@@ -1,15 +1,7 @@
-"""
-Copyright(c) 2021 Bitcoin Association.
-Distributed under the Open BSV software license, see the accompanying file LICENSE
-"""
+# Copyright(c) 2022 Bitcoin Association.
+# Distributed under the Open BSV software license, see the accompanying file LICENSE
 
-try:
-    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
-    import pysqlite3 as sqlite3
-except ModuleNotFoundError:
-    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
-    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
-    import sqlite3  # type: ignore
+from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
@@ -19,46 +11,71 @@ import os
 from pathlib import Path
 import struct
 import threading
-from typing import AsyncIterator, Optional
+from typing import Optional
+import weakref
 
 import aiohttp
 from aiohttp import web
 from electrumsv_database.sqlite import DatabaseContext
 
-from .constants import ACCOUNT_MESSAGE_NAMES, Network, SERVER_HOST, SERVER_PORT
-from . import handlers, handlers_headers, handlers_indexer
-from .indexer_support import maintain_indexer_connection, unregister_unwanted_spent_outputs
+try:
+    # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
+    import pysqlite3 as sqlite3
+except ModuleNotFoundError:
+    # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
+    # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
+    import sqlite3  # type: ignore
+
+
+from .constants import ACCOUNT_MESSAGE_NAMES, Network
+from .indexer_support import maintain_indexer_connection_async, unregister_unwanted_spent_outputs
 from .keys import create_regtest_server_keys, ServerKeys
-from . import msg_box
-from .msg_box.controller import MsgBoxWebSocket
 from .msg_box.repositories import MsgBoxSQLiteRepository
 from . import sqlite_db
 from .types import AccountMessage, AccountWebsocketState, GeneralNotification, \
     HeadersWSClient, MsgBoxWSClient, Outpoint, PushNotification
 from .utils import pack_account_message_bytes
-from .websock import GeneralWebSocket
 
-MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 
-# Silence verbose logging
-logger = logging.getLogger("server")
-
-aiohttp_logger = logging.getLogger("aiohttp")
-aiohttp_logger.setLevel(logging.WARNING)
-requests_logger = logging.getLogger("urllib3")
-requests_logger.setLevel(logging.WARNING)
+logger = logging.getLogger("app-state")
 
 
 class ApplicationState(object):
     server_keys: ServerKeys
-    is_alive: bool = False
 
-    def __init__(self, app: web.Application, network: Network, datastore_location: Path,
-            host: str, port: int) -> None:
-        self.logger = logging.getLogger('app_state')
-        self.app = app
-        self.host = host
-        self.port = port
+    # This application should always be present.
+    external_application: web.Application
+    # This application may be present if there is need for it.
+    internal_application: Optional[web.Application] = None
+
+    singleton_reference: Optional[weakref.ReferenceType[ApplicationState]] = None
+    singleton_event = threading.Event()
+
+    def __init__(self, network: Network, datastore_location: Path, internal_host: str,
+            internal_port: int, external_host: str, external_port: int) -> None:
+        self.logger = logging.getLogger('app-state')
+
+        assert ApplicationState.singleton_reference is None
+        ApplicationState.singleton_reference = weakref.ref(self)
+
+        self._internal_server_started = False
+        self._external_server_started = False
+
+        self.internal_host = internal_host
+        self.internal_port = internal_port
+        self.external_host = external_host
+        self.external_port = external_port
+        self.network = network
+
+        if network == network.REGTEST:
+            self.server_keys = create_regtest_server_keys()
+        else:
+            # TODO(temporary-prototype-choice) Have some way of finding the non-regtest keys.
+            #     Error if they cannot be found.
+            raise NotImplementedError
+
+        self._exit_event = asyncio.Event()
+        self.aiohttp_session = aiohttp.ClientSession()
 
         self._account_websocket_state: dict[str, AccountWebsocketState] = {}
         self._account_websocket_id_by_account_id: dict[int, str] = {}  # account_id: ws_id
@@ -72,8 +89,6 @@ class ApplicationState(object):
         self.msg_box_ws_clients_map: dict[int, set[str]] = {}  # msg_box_id: ws_ids
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
         self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
-
-        self.network = network
 
         def _setup_database(db: Optional[sqlite3.Connection]=None) -> None:
             if int(os.getenv('REFERENCE_SERVER_RESET', "0")):
@@ -89,7 +104,10 @@ class ApplicationState(object):
         self.database_context.run_in_thread(_setup_database)
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
-        self.aiohttp_session: Optional[aiohttp.ClientSession] = None
+
+        self._account_notifications_task: Optional[asyncio.Task[None]] = None
+        self._message_box_notifications_task: Optional[asyncio.Task[None]] = None
+        self._header_notifications_task: Optional[asyncio.Task[None]] = None
 
         # Indexer-related state.
         self._indexer_task: Optional[asyncio.Task[None]] = None
@@ -97,17 +115,61 @@ class ApplicationState(object):
         self.indexer_is_connected = False
         self._output_spend_counts: dict[Outpoint, int] = defaultdict(int)
 
-    def start_tasks(self) -> None:
-        asyncio.create_task(self._account_notifications_task())
-        asyncio.create_task(self.message_box_notifications_task())
-        if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
-            asyncio.create_task(self.header_notifications_task())
-        if os.getenv("EXPOSE_INDEXER_APIS", "0") == "1":
-            self._indexer_task = asyncio.create_task(maintain_indexer_connection(self))
+    async def setup_async(self, internal_application: Optional[web.Application],
+            external_application: web.Application) -> None:
+        self.internal_application = internal_application
+        self.external_application = external_application
 
-    def stop_tasks(self) -> None:
+        self._account_notifications_task = asyncio.create_task(
+            self._manage_account_notifications_async())
+        self._message_box_notifications_task = asyncio.create_task(
+            self._manage_message_box_notifications_async())
+        if os.getenv('EXPOSE_HEADER_SV_APIS', '0') == '1':
+            self._header_notification_task = asyncio.create_task(
+                self._header_notifications_task_async())
+        if os.getenv("EXPOSE_INDEXER_APIS", "0") == "1":
+            self._indexer_task = asyncio.create_task(maintain_indexer_connection_async(self))
+
+    async def teardown_async(self) -> None:
+        self._exit_event.set()
+
+        if self._account_notifications_task is not None:
+            self._account_notifications_task.cancel()
+        if self._message_box_notifications_task is not None:
+            self._message_box_notifications_task.cancel()
+        if self._header_notifications_task is not None:
+            self._header_notifications_task.cancel()
         if self._indexer_task is not None:
             self._indexer_task.cancel()
+
+        self.logger.info("Closing HTTP sessions")
+        await self.aiohttp_session.close()
+
+        # In theory this will block additional writes being put in place and empty the existing
+        # queue. But the write dispatcher will block this thread, the async thread, while it
+        # does this. That means that the tasks above may not get a chance to cleanly exit, and
+        # remember explicit `cancel` calls schedule the task being cancelled and we do not yield
+        # the async thread allowing further tasks to happen.
+        # TODO(1.4.0) Clean exit. Async tasks may need to do writes on exit. Look into this.
+        self.logger.info("Closing database")
+        self.database_context.close()
+
+        ApplicationState.singleton_reference = None
+
+    async def wait_for_exit_async(self, internal: bool=False, external: bool=False) -> None:
+        startup_complete = False
+        if internal:
+            self._internal_server_started = True
+            startup_complete = self._external_server_started
+        elif external:
+            self._external_server_started = True
+            if self.internal_application is None:
+                startup_complete = True
+            else:
+                startup_complete = self._internal_server_started
+        if startup_complete:
+            self.singleton_event.set()
+        await self._exit_event.wait()
 
     # Headers Websocket Client Get/Add/Remove & Notify thread
     def get_headers_ws_clients(self) -> dict[str, HeadersWSClient]:
@@ -122,22 +184,16 @@ class ApplicationState(object):
         with self.headers_ws_clients_lock:
             del self.headers_ws_clients[ws_id]
 
-    async def _get_aiohttp_session(self) -> aiohttp.ClientSession:
-        if not self.aiohttp_session:
-            self.aiohttp_session = aiohttp.ClientSession()
+    def get_aiohttp_session(self) -> aiohttp.ClientSession:
         return self.aiohttp_session
 
-    async def close_aiohttp_session(self) -> None:
-        if self.aiohttp_session:
-            await self.aiohttp_session.close()
-
-    async def header_notifications_task(self) -> None:
+    async def _header_notifications_task_async(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
-            session = await self._get_aiohttp_session()
+            session = self.get_aiohttp_session()
             current_best_hash = ""
 
-            while self.is_alive:
+            while not self._exit_event.is_set():
                 try:
                     url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
@@ -204,7 +260,7 @@ class ApplicationState(object):
         except Exception:
             self.logger.exception("unexpected exception in header_notifications_thread")
         finally:
-            self.logger.info("Closing push notifications thread")
+            self.logger.info("Closing header push notifications thread")
 
     # Message Box Websocket Client Get/Add/Remove & Notify thread
     def get_msg_box_ws_clients(self) -> dict[str, MsgBoxWSClient]:
@@ -236,12 +292,12 @@ class ApplicationState(object):
             if len(self.msg_box_ws_clients_map[msg_box_internal_id]) == 0:
                 del self.msg_box_ws_clients_map[msg_box_internal_id]
 
-    async def message_box_notifications_task(self) -> None:
+    async def _manage_message_box_notifications_async(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
             notification: PushNotification
             ws_client: MsgBoxWSClient
-            while self.is_alive:
+            while not self._exit_event.is_set():
                 try:
                     msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
                 except Exception as e:
@@ -272,7 +328,7 @@ class ApplicationState(object):
         except Exception:
             self.logger.exception("unexpected exception in message_box_notifications_task")
         finally:
-            self.logger.info("Closing push notifications thread")
+            self.logger.info("Closing peer channel push notifications thread")
 
     # General Websocket Client Get/Add/Remove & Notify thread
     def get_account_websockets(self) -> dict[str, AccountWebsocketState]:
@@ -322,12 +378,12 @@ class ApplicationState(object):
                 asyncio.create_task(
                     unregister_unwanted_spent_outputs(self, account_id, outpoints_to_unregister))
 
-    async def _account_notifications_task(self) -> None:
+    async def _manage_account_notifications_async(self) -> None:
         """
         Serialise and send outgoing account-related notifications.
         """
         try:
-            while self.is_alive:
+            while not self._exit_event.is_set():
                 account_id, message_kind, payload = await self.account_message_queue.get()
                 self.logger.debug("Got account notification, account_id=%d", account_id)
 
@@ -361,127 +417,4 @@ class ApplicationState(object):
                             "Dropped message for disconnected binary websocket, message_kind=%s, "
                             "account_id=%d", message_kind, account_id)
         finally:
-            self.logger.info("exiting push notifications thread")
-
-
-async def client_session_ctx(app: web.Application) -> AsyncIterator[None]:
-    """
-    Cleanup context async generator to create and properly close aiohttp ClientSession
-    Ref.:
-        > https://docs.aiohttp.org/en/stable/web_advanced.html#cleanup-context
-        > https://docs.aiohttp.org/en/stable/web_advanced.html#aiohttp-web-signals
-        > https://docs.aiohttp.org/en/stable/web_advanced.html#data-sharing-aka-no-singletons-please
-    """
-    app['client_session'] = aiohttp.ClientSession()
-
-    yield
-
-    logger.debug('Closing ClientSession')
-    await app['client_session'].close()
-
-
-def get_aiohttp_app(network: Network, datastore_location: Path, host: str = SERVER_HOST,
-        port: int = SERVER_PORT) -> tuple[web.Application, str, int]:
-    app = web.Application()
-    app.cleanup_ctx.append(client_session_ctx)
-    app_state = ApplicationState(app, network, datastore_location, host, port)
-
-    if network == network.REGTEST:
-        app_state.server_keys = create_regtest_server_keys()
-    else:
-        # TODO(temporary-prototype-choice) Have some way of finding the non-regtest keys.
-        #     Error if they cannot be found.
-        raise NotImplementedError
-
-    # This is the standard aiohttp way of managing state within the handlers
-    app['app_state'] = app_state
-    app['headers_ws_clients'] = app_state.headers_ws_clients
-    app['msg_box_ws_clients'] = app_state.msg_box_ws_clients
-    app['_account_websocket_state'] = app_state._account_websocket_state
-
-    # Non-optional APIs
-    app.add_routes([
-        web.get("/", handlers.ping),
-        web.get("/api/v1/endpoints", handlers.get_endpoints_data),
-
-        # Payment Channel Account Management
-        web.get("/api/v1/account", handlers.get_account),
-        web.post("/api/v1/account/key", handlers.post_account_key),
-        web.post("/api/v1/account/channel", handlers.post_account_channel),
-        web.put("/api/v1/account/channel", handlers.put_account_channel_update),
-        web.delete("/api/v1/account/channel", handlers.delete_account_channel),
-        web.post("/api/v1/account/funding", handlers.post_account_funding),
-
-        # Message Box Management (i.e. Custom Peer Channels implementation)
-        web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels, allow_head=False),
-        web.get("/api/v1/channel/manage/{channelid}",
-            msg_box.controller.get_single_channel_details),
-        web.post("/api/v1/channel/manage/{channelid}",
-            msg_box.controller.update_single_channel_properties),
-        web.delete("/api/v1/channel/manage/{channelid}", msg_box.controller.delete_channel),
-        web.post("/api/v1/channel/manage", msg_box.controller.create_new_channel),
-        web.get("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
-            msg_box.controller.get_token_details),
-        web.delete("/api/v1/channel/manage/{channelid}/api-token/{tokenid}",
-            msg_box.controller.revoke_selected_token),
-        web.get("/api/v1/channel/manage/{channelid}/api-token",
-            msg_box.controller.get_list_of_tokens),
-        web.post("/api/v1/channel/manage/{channelid}/api-token",
-            msg_box.controller.create_new_token_for_channel),
-
-        # Message Box Push / Pull API
-        web.post("/api/v1/channel/{channelid}", msg_box.controller.write_message),
-        # web.head is added automatically by web.get in aiohttp
-        # NOTE(hardcoded-url) Update this if updating the server URL.
-        web.get("/api/v1/channel/{channelid}", msg_box.controller.get_messages),
-        web.post("/api/v1/channel/{channelid}/{sequence}",
-            msg_box.controller.mark_message_read_or_unread),
-        web.delete("/api/v1/channel/{channelid}/{sequence}", msg_box.controller.delete_message),
-
-        # Message Box Websocket API
-        web.view("/api/v1/channel/{channelid}/notify", MsgBoxWebSocket),
-
-        # General-Purpose consolidated Websocket - Requires master bearer token
-        web.view("/api/v1/web-socket", GeneralWebSocket),
-    ])
-    if os.getenv("EXPOSE_HEADER_SV_APIS") == "1":
-        app.add_routes([
-            web.view("/api/v1/headers/tips/websocket", handlers_headers.HeadersWebSocket),
-            web.get("/api/v1/headers/tips", handlers_headers.get_chain_tips),
-            web.get("/api/v1/headers/by-height", handlers_headers.get_headers_by_height),
-            web.get("/api/v1/headers/{hash}", handlers_headers.get_header),
-        ])
-
-    if os.getenv("EXPOSE_PAYMAIL_APIS") == "1":
-        pass  # TBD
-
-    if os.getenv("EXPOSE_INDEXER_APIS") == "1":
-        app.add_routes([
-            web.get("/api/v1/indexer",
-                handlers_indexer.indexer_get_indexer_settings),
-            web.post("/api/v1/indexer",
-                handlers_indexer.indexer_post_indexer_settings),
-            # These need to be registered before "get transaction" to avoid clashes.
-            web.get("/api/v1/transaction/filter",
-                handlers_indexer.indexer_get_transaction_filter),
-            web.post("/api/v1/transaction/filter",
-                handlers_indexer.indexer_post_transaction_filter),
-            web.post("/api/v1/transaction/filter:delete",
-                handlers_indexer.indexer_post_transaction_filter_delete),
-            # TODO(1.4.0) Technical debt. We can enforce txid with {txid:[a-fA-F0-9]{64}} in theory.
-            web.get("/api/v1/transaction/{txid}",
-                handlers_indexer.indexer_get_transaction),
-
-            # TODO(1.4.0) Technical debt. We can enforce txid with {txid:[a-fA-F0-9]{64}} in theory.
-            web.get("/api/v1/merkle-proof/{txid}",
-                handlers_indexer.indexer_get_merkle_proof),
-            web.post("/api/v1/restoration/search",
-                handlers_indexer.indexer_post_restoration_search),
-
-            web.post("/api/v1/output-spend",
-                handlers_indexer.indexer_post_output_spends),
-            web.post("/api/v1/output-spend/notifications",
-                handlers_indexer.indexer_post_output_spend_notifications),
-        ])
-
-    return app, host, port
+            self.logger.info("Exiting account push notifications thread")

@@ -1,25 +1,33 @@
+# Copyright(c) 2021-2022 Bitcoin Association.
+# Distributed under the Open BSV software license, see the accompanying file LICENSE
+
+from __future__ import annotations
 import os
 import sys
 from pathlib import Path
 import asyncio
 import logging
-import typing
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from typing import cast, Optional
 
 from aiohttp import web
 
-from esv_reference_server.server import get_aiohttp_app
-from esv_reference_server.constants import DEFAULT_DATABASE_NAME, SERVER_HOST, SERVER_PORT, \
-    STRING_TO_NETWORK_ENUM_MAP
-
-if typing.TYPE_CHECKING:
-    from .esv_reference_server.server import ApplicationState
+from esv_reference_server.application_state import ApplicationState
+from esv_reference_server.server_external import ExternalServer, get_external_server_application
+from esv_reference_server.server_internal import InternalServer, get_internal_server_application
+from esv_reference_server.constants import DEFAULT_DATABASE_NAME, EXTERNAL_SERVER_HOST, \
+    EXTERNAL_SERVER_PORT, INTERNAL_SERVER_HOST, INTERNAL_SERVER_PORT, Network
 
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 LOG_PATH = Path('logs') / 'esv_reference_server.log'
 logger = logging.getLogger("server")
+
+# Silence verbose logging
+aiohttp_logger = logging.getLogger("aiohttp")
+aiohttp_logger.setLevel(logging.WARNING)
+requests_logger = logging.getLogger("urllib3")
+requests_logger.setLevel(logging.WARNING)
 
 
 def create_log_file_if_not_exist(data_path: Path) -> Path:
@@ -44,47 +52,6 @@ def setup_logging(data_path: Path) -> None:
     logger.debug("File logging path=%s", full_log_path)
 
 
-
-class AiohttpServer:
-
-    def __init__(self, app: web.Application, host: str = SERVER_HOST, port: int = SERVER_PORT) \
-            -> None:
-        self.runner: Optional[web.AppRunner] = None
-        self.app = app
-        self.app_state: 'ApplicationState' = app['app_state']
-        self.app.on_startup.append(self.on_startup)
-        self.app.on_shutdown.append(self.on_shutdown)
-        self.app.freeze()  # No further callback modification allowed
-        self.host = host
-        self.port = int(os.getenv('SERVER_PORT', port))
-        self.logger = logging.getLogger("aiohttp-rest-api")
-
-    async def on_startup(self, app: web.Application) -> None:
-        pass
-
-    async def on_shutdown(self, app: web.Application) -> None:
-        self.logger.debug("Stopping server...")
-        await self.app_state.close_aiohttp_session()
-        self.app_state.is_alive = False
-        self.logger.info("Stopped server")
-
-    async def start(self) -> None:
-        self.app_state.is_alive = True
-        self.logger.info("Started server on http://%s:%s", self.host, self.port)
-        self.runner = web.AppRunner(self.app, access_log=None)
-        await self.runner.setup()
-        site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
-        await site.start()
-        self.app_state.start_tasks()
-        while self.app_state.is_alive:
-            await asyncio.sleep(0.5)
-
-    async def stop(self) -> None:
-        self.app_state.stop_tasks()
-        assert self.runner is not None
-        await self.runner.cleanup()
-
-
 def load_dotenv(dotenv_path: Path) -> None:
     with open(dotenv_path, 'r') as f:
         lines = f.readlines()
@@ -99,8 +66,7 @@ def load_dotenv(dotenv_path: Path) -> None:
             os.environ[key] = val
 
 
-def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
-        -> tuple[web.Application, str, int]:
+def setup_application() -> tuple[Network, Path]:
     # Used for unit testing to override usual configuration
     if not os.getenv("SKIP_DOTENV_FILE") == '1':
         dotenv_path = MODULE_DIR.joinpath('.env')
@@ -114,31 +80,86 @@ def get_app(host: str = SERVER_HOST, port: int = SERVER_PORT) \
     setup_logging(data_path)
 
     human_readable_network = os.getenv('NETWORK', 'regtest')
-    network_enum = STRING_TO_NETWORK_ENUM_MAP[human_readable_network]
+    which_network: Network
+    if human_readable_network == 'regtest':
+        which_network = Network.REGTEST
+    elif human_readable_network == 'mainnet':
+        which_network = Network.MAINNET
+    elif human_readable_network == 'scaling-testnet':
+        which_network = Network.STN
+    elif human_readable_network == 'testnet':
+        which_network = Network.TESTNET
+    else:
+        print(f"Invalid network '{human_readable_network}'")
+        sys.exit(1)
+
     logger.debug("Running in %s mode", human_readable_network)
 
     datastore_location = data_path / DEFAULT_DATABASE_NAME
     logger.debug("Datastore location %s", datastore_location)
 
-    app = get_aiohttp_app(network_enum, datastore_location, host, port)
-    return app
+    return which_network, datastore_location
 
 
 async def main() -> None:
-    app, host, port = get_app()
-    server = AiohttpServer(app, host, port)
+    external_host = cast(str, os.getenv("EXTERNAL_HOST", EXTERNAL_SERVER_HOST))
+    external_port_text = os.getenv("EXTERNAL_PORT", EXTERNAL_SERVER_PORT)
     try:
-        await server.start()
+        external_port = int(external_port_text)
+    except ValueError:
+        print(f"Invalid `EXTERNAL_PORT` value '{external_port_text}'")
+        sys.exit(1)
+
+    internal_host = cast(str, os.getenv("INTERNAL_HOST", INTERNAL_SERVER_HOST))
+    internal_port_text = os.getenv("INTERNAL_PORT", INTERNAL_SERVER_PORT)
+    try:
+        internal_port = int(internal_port_text)
+    except ValueError:
+        print(f"Invalid `INTERNAL_PORT` value '{internal_port_text}'")
+        sys.exit(1)
+
+    which_network, datastore_location = setup_application()
+    application_state = ApplicationState(which_network, datastore_location, internal_host,
+        internal_port, external_host, external_port)
+
+    use_internal_server = os.getenv("EXPOSE_INDEXER_APIS") == "1"
+    internal_application: Optional[web.Application] = None
+    if use_internal_server:
+        assert application_state.indexer_url is not None
+        internal_application = get_internal_server_application(application_state)
+    external_application = get_external_server_application(application_state)
+
+    await application_state.setup_async(internal_application, external_application)
+
+    internal_server: Optional[InternalServer] = None
+    tasks = list[asyncio.Task[None]]()
+    if use_internal_server:
+        assert internal_application is not None
+        internal_server = InternalServer(internal_application, application_state, internal_host,
+            internal_port)
+        run_internal_server_task = asyncio.create_task(internal_server.run_async())
+        tasks.append(run_internal_server_task)
+    external_server = ExternalServer(external_application, application_state, external_host,
+        external_port)
+    run_external_server_task = asyncio.create_task(external_server.run_async())
+    tasks.append(run_external_server_task)
+    try:
+        await asyncio.gather(*tasks)
     finally:
-        await server.stop()
+        # In some cases `gather` can exit while leaving a task running, for instance if one
+        # task raises an exception out of gather the other task will continue running.
+        # - https://docs.python.org/3/library/asyncio-task.html#asyncio.gather
+        for task in tasks:
+            task.cancel()
+        await application_state.teardown_async()
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-        sys.exit(0)
     except KeyboardInterrupt:
         pass
     except Exception:
         logger.exception("unexpected exception in __main__")
     finally:
-        logger.info("ElectrumSV reference server exited")
+        logger.info("Exiting reference server")

@@ -23,20 +23,17 @@ from electrumsv_database.sqlite import replace_db_context_with_connection
 import pytest
 import requests
 
-from esv_reference_server import sqlite_db
+from esv_reference_server.application_state import ApplicationState
 from esv_reference_server.errors import WebsocketUnauthorizedException
+from esv_reference_server import sqlite_db
 
-from . import conftest
 from .conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
-    WS_URL_GENERAL, _subscribe_to_general_notifications_peer_channels
-
-if TYPE_CHECKING:
-    from esv_reference_server.server import ApplicationState
+    _subscribe_to_general_notifications_peer_channels, TEST_EXTERNAL_HOST, TEST_EXTERNAL_PORT, \
+    WS_URL_GENERAL
 
 
-TEST_HOST = "127.0.0.1"
-TEST_PORT = 55666
-WS_URL_TEMPLATE_MSG_BOX = "ws://localhost:55666/api/v1/channel/{channelid}/notify"
+WS_URL_TEMPLATE_MSG_BOX = "ws://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+    "/api/v1/channel/{channelid}/notify"
 
 PRIVATE_KEY_1 = PrivateKey.from_hex(
     "720f1987db69efa562b3dabd78e51f19bd8da76c70ad839b72b939f4071b144b")
@@ -63,11 +60,11 @@ class TestAiohttpRESTAPI:
 
     @classmethod
     def setup_class(cls) -> None:
-        app = conftest.app_reference
-        assert app is not None
-        app_state: ApplicationState = app["app_state"]
+        assert ApplicationState.singleton_reference is not None
+        application_state = ApplicationState.singleton_reference()
+        assert application_state is not None
 
-        cls._account_id, cls._api_key = app_state.database_context.run_in_thread(
+        cls._account_id, cls._api_key = application_state.database_context.run_in_thread(
             sqlite_db.create_account, PUBLIC_KEY_1.to_bytes(compressed=True))
 
     def setup_method(self) -> None:
@@ -81,7 +78,8 @@ class TestAiohttpRESTAPI:
         pass
 
     async def _create_new_channel(self) -> tuple[str, str, str]:
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage'
+        URL = "http://{host}:{port}/api/v1/channel/manage".format(host=TEST_EXTERNAL_HOST,
+            port=TEST_EXTERNAL_PORT)
         request_body = {
             "public_read": True,
             "public_write": True,
@@ -106,7 +104,8 @@ class TestAiohttpRESTAPI:
                 return CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID
 
     async def _create_read_only_token(self, CHANNEL_ID: str) -> tuple[str, str]:
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token'
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/channel/manage/{channelid}/api-token"
         request_body = {
             "description": "websocket read only token",
             "can_read": True,
@@ -126,13 +125,14 @@ class TestAiohttpRESTAPI:
 
     @pytest.mark.asyncio
     def test_ping(self) -> None:
-        URL = 'http://127.0.0.1:55666/'
+        URL = "http://{host}:{port}/".format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT)
         result = requests.get(URL)
         assert result.text is not None
 
     @pytest.mark.asyncio
     def test_create_new_channel(self) -> None:
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage'
+        URL = 'http://{host}:{port}/api/v1/channel/manage'.format(host=TEST_EXTERNAL_HOST,
+            port=TEST_EXTERNAL_PORT)
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -160,7 +160,7 @@ class TestAiohttpRESTAPI:
         single_channel_data = response_body
         CHANNEL_ID = single_channel_data['id']
         assert single_channel_data['href'] == \
-            f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+            f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
         assert single_channel_data['public_write'] is True
         assert single_channel_data['sequenced'] is True
@@ -180,7 +180,8 @@ class TestAiohttpRESTAPI:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: create_new_token_for_channel
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token'
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/channel/manage/{channelid}/api-token"
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -213,7 +214,8 @@ class TestAiohttpRESTAPI:
     @pytest.mark.asyncio
     def test_list_channels(self) -> None:
         # handler: list_channels
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/list'
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/channel/manage/list"
         HTTP_METHOD = 'get'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -253,7 +255,8 @@ class TestAiohttpRESTAPI:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: get_single_channel_details
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}'
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/channel/manage/{channelid}"
         HTTP_METHOD = 'get'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -271,7 +274,7 @@ class TestAiohttpRESTAPI:
 
         single_channel_data = response_body
         assert single_channel_data['href'] == \
-            f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+            f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
         assert single_channel_data['public_write'] is True
         assert single_channel_data['sequenced'] is True
@@ -291,7 +294,8 @@ class TestAiohttpRESTAPI:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: update_single_channel_properties
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}'
+        URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/channel/manage/{channelid}"
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -326,8 +330,9 @@ class TestAiohttpRESTAPI:
             "can_write": False
         }
         # handler: get_token_details
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
-            .format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
+        URL = 'http://{host}:{port}/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
+            .format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT, channelid=CHANNEL_ID,
+                tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         HTTP_METHOD = 'get'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -368,8 +373,8 @@ class TestAiohttpRESTAPI:
         ]
 
         # handler: get_list_of_tokens
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token'\
-            .format(channelid=CHANNEL_ID)
+        URL = 'http://{host}:{port}/api/v1/channel/manage/{channelid}/api-token'\
+            .format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT, channelid=CHANNEL_ID)
         HTTP_METHOD = 'get'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -393,7 +398,8 @@ class TestAiohttpRESTAPI:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: write_message
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}'.format(channelid=CHANNEL_ID)
+        URL = 'http://{host}:{port}/api/v1/channel/{channelid}'.format(host=TEST_EXTERNAL_HOST,
+            port=TEST_EXTERNAL_PORT, channelid=CHANNEL_ID)
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -421,7 +427,7 @@ class TestAiohttpRESTAPI:
         }
 
         # handler: write_message
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}'.format(channelid=CHANNEL_ID)
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -440,7 +446,7 @@ class TestAiohttpRESTAPI:
             "key": "value"
         }
         # handler: write_message
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}'.format(channelid=CHANNEL_ID)
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -464,7 +470,7 @@ class TestAiohttpRESTAPI:
         }
 
         # handler: write_message
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}'.format(channelid=CHANNEL_ID)
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -491,7 +497,7 @@ class TestAiohttpRESTAPI:
         self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         # handler: get_messages
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}'.format(channelid=CHANNEL_ID)
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         HTTP_METHOD = 'head'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -512,8 +518,8 @@ class TestAiohttpRESTAPI:
 
         # handler: get_messages
         query_params = "?unread=true"
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}'.format(channelid=CHANNEL_ID) + \
-              query_params
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}" + \
+            query_params
         HTTP_METHOD = 'get'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -541,8 +547,8 @@ class TestAiohttpRESTAPI:
         # handler: mark_message_read_or_unread
         sequence = 1
         query_params = "?older=true"
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}/{sequence}'\
-                  .format(channelid=CHANNEL_ID, sequence=sequence) + query_params
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+            f"/api/v1/channel/{CHANNEL_ID}/{sequence}" + query_params
         HTTP_METHOD = 'post'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -555,8 +561,8 @@ class TestAiohttpRESTAPI:
 
         sequence = 2
         query_params = "?older=true"
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}/{sequence}'\
-                  .format(channelid=CHANNEL_ID, sequence=sequence) + query_params
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+            f"/api/v1/channel/{CHANNEL_ID}/{sequence}" + query_params
         result = _successful_call(URL, HTTP_METHOD, None, body,
             CHANNEL_READ_ONLY_TOKEN)
         assert result.status_code == 404, result.reason
@@ -571,8 +577,8 @@ class TestAiohttpRESTAPI:
 
         # handler: delete_message
         sequence = 1
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}/{sequence}'\
-            .format(channelid=CHANNEL_ID, sequence=sequence)
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+            f"/api/v1/channel/{CHANNEL_ID}/{sequence}"
         HTTP_METHOD = 'delete'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -597,8 +603,8 @@ class TestAiohttpRESTAPI:
         _response = self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         sequence = 1
-        URL = 'http://127.0.0.1:55666/api/v1/channel/{channelid}/{sequence}'\
-            .format(channelid=CHANNEL_ID, sequence=sequence)
+        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+            f"/api/v1/channel/{CHANNEL_ID}/{sequence}"
         HTTP_METHOD = 'delete'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -679,7 +685,8 @@ class TestAiohttpRESTAPI:
                 headers["Authorization"] = f"Bearer {CHANNEL_BEARER_TOKEN}"
                 request_body = {"key": "value"}
 
-                url = f"http://127.0.0.1:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+                url = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}" + \
+                    f"/api/v1/channel/{CHANNEL_ID}"
 
                 async with aiohttp.ClientSession() as session:
                     headers = {"Authorization": f"Bearer {CHANNEL_BEARER_TOKEN}"}
@@ -745,7 +752,8 @@ class TestAiohttpRESTAPI:
                 headers["Authorization"] = f"Bearer {CHANNEL_BEARER_TOKEN}"
                 request_body = {"key": "value"}
 
-                url = f"http://127.0.0.1:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+                url = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+                    f"/api/v1/channel/{CHANNEL_ID}"
 
                 async with aiohttp.ClientSession() as session:
                     headers = {"Authorization": f"Bearer {CHANNEL_BEARER_TOKEN}"}
@@ -785,8 +793,9 @@ class TestAiohttpRESTAPI:
             await self._create_read_only_token(CHANNEL_ID)
 
         # handler: revoke_selected_token
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
-            .format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
+        URL = 'http://{host}:{port}/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
+            .format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT, channelid=CHANNEL_ID,
+                tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         HTTP_METHOD = 'delete'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -802,8 +811,9 @@ class TestAiohttpRESTAPI:
 
     def _revoke_token(self, CHANNEL_ID: str, CHANNEL_READ_ONLY_TOKEN_ID: str) -> requests.Response:
         # handler: revoke_selected_token
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
-            .format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
+        URL = 'http://{host}:{port}/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
+            .format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT, channelid=CHANNEL_ID,
+                tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         HTTP_METHOD = 'delete'
 
         good_bearer_token = self._api_key
@@ -821,8 +831,9 @@ class TestAiohttpRESTAPI:
         self._revoke_token(CHANNEL_ID, CHANNEL_READ_ONLY_TOKEN_ID)
 
         # handler: get_token_details
-        URL = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
-            .format(channelid=CHANNEL_ID, tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
+        URL = 'http://{host}:{port}/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
+            .format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT, channelid=CHANNEL_ID,
+                tokenid=CHANNEL_READ_ONLY_TOKEN_ID)
         HTTP_METHOD = 'get'
         _no_auth(URL, HTTP_METHOD)
         _wrong_auth_type(URL, HTTP_METHOD)
@@ -838,9 +849,9 @@ class TestAiohttpRESTAPI:
 
     @pytest.mark.asyncio
     async def test_delete_channel(self) -> None:
-        app = conftest.app_reference
-        assert app is not None
-        app_state: ApplicationState = app["app_state"]
+        assert ApplicationState.singleton_reference is not None
+        application_state = ApplicationState.singleton_reference()
+        assert application_state is not None
 
         await self._create_new_channel()
 
@@ -850,9 +861,10 @@ class TestAiohttpRESTAPI:
             assert len(rows) > 0
             return [ row[0] for row in rows ]
 
-        channel_ids_for_deletion = read(app_state.database_context)
+        channel_ids_for_deletion = read(application_state.database_context)
 
-        URL_TEMPLATE = 'http://127.0.0.1:55666/api/v1/channel/manage/{channelid}'
+        URL_TEMPLATE = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
+            "/api/v1/channel/manage/{channelid}"
         HTTP_METHOD = 'delete'
         _no_auth(URL_TEMPLATE, HTTP_METHOD)
         _wrong_auth_type(URL_TEMPLATE, HTTP_METHOD)
@@ -870,10 +882,10 @@ class TestAiohttpRESTAPI:
         def read2(db: sqlite3.Connection) -> None:
             rows = db.execute("SELECT * FROM msg_box").fetchall()
             assert len(rows) == 0
-        read2(app_state.database_context)
+        read2(application_state.database_context)
 
         @replace_db_context_with_connection
         def read3(db: sqlite3.Connection) -> None:
             rows = db.execute("SELECT * FROM msg_box_api_token").fetchall()
             assert len(rows) == 0
-        read3(app_state.database_context)
+        read3(application_state.database_context)

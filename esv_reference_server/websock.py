@@ -14,7 +14,7 @@ from . import sqlite_db
 from .types import AccountWebsocketState, AccountWebsocketMediaType
 
 if TYPE_CHECKING:
-    from esv_reference_server.server import ApplicationState
+    from esv_reference_server.application_state import ApplicationState
 
 
 class GeneralWebSocket(web.View):

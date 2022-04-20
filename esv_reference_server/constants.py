@@ -8,9 +8,10 @@ from enum import IntEnum, IntFlag
 from bitcoinx import PrivateKey, sha256
 
 
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 47124
-BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
+EXTERNAL_SERVER_HOST = "127.0.0.1"
+EXTERNAL_SERVER_PORT = 47124
+INTERNAL_SERVER_HOST = "127.0.0.1"
+INTERNAL_SERVER_PORT = 47126
 
 # These should be used for Regtest only.
 REGTEST_PRIVATE_KEY_HEX = "9f9746a336ebf3748fe8e790f979075b785a4ec9ae1cbdfb9692ee024a03a3cb"
@@ -37,16 +38,16 @@ MINIMUM_CHANNEL_PAYMENT_VALUE = 1000
 SAFE_DUST_VALUE = 546
 
 
-class AccountFlags(IntFlag):
-    NONE = 0
+class AccountFlag(IntFlag):
+    NONE                                    = 0
     # Until an account has a funded payment channel it is not usable/accessible. Do not remove
     # this flag unless
-    MID_CREATION = 1 << 0
+    MID_CREATION                            = 1 << 0
 
-    DISABLED_FLAGGED = 1 << 10
+    DISABLED_FLAGGED                        = 1 << 10
 
-    ACTIVE_MASK = MID_CREATION
-    DISABLED_MASK = DISABLED_FLAGGED
+    ACTIVE_MASK                             = MID_CREATION
+    DISABLED_MASK                           = DISABLED_FLAGGED
 
 
 class ChannelState(IntEnum):
@@ -65,14 +66,6 @@ class Network(IntEnum):
     TESTNET = 2
     STN = 3
     MAINNET = 4
-
-
-STRING_TO_NETWORK_ENUM_MAP = {
-    'regtest': Network.REGTEST,
-    'mainnet': Network.MAINNET,
-    'scaling-testnet': Network.STN,
-    'testnet': Network.TESTNET
-}
 
 
 class AccountMessageKind(IntEnum):

@@ -34,10 +34,10 @@ except ModuleNotFoundError:
 import time
 from typing import Any, cast, NamedTuple, Optional
 
-from electrumsv_database.sqlite import replace_db_context_with_connection
+from electrumsv_database.sqlite import read_rows_by_id, replace_db_context_with_connection
 
-from .constants import AccountFlags, ChannelState, IndexerPushdataRegistrationFlag
-from .types import TipFilterListEntry, TipFilterRegistrationEntry
+from .constants import AccountFlag, ChannelState, IndexerPushdataRegistrationFlag
+from .types import AccountIndexerMetadata, TipFilterListEntry, TipFilterRegistrationEntry
 from .utils import create_account_api_token
 
 _ = """
@@ -55,7 +55,7 @@ class AccountMetadata(NamedTuple):
     # This is the account funding payment channel for this account. It is possible we may later
     # want to have multiple payment channels for a given account, for different purposes.
     active_channel_id: Optional[int]
-    flags: AccountFlags
+    flags: AccountFlag
     # For each payment channel the client opens with the server we increment this number.
     last_payment_key_index: int
 
@@ -119,14 +119,34 @@ def clear_stale_state(db: sqlite3.Connection) -> None:
 # SECTION: Accounts
 
 def create_account_table(db: sqlite3.Connection) -> None:
+    """
+        flags:                      ...
+        public_key_bytes:           ...
+        active_channel_id:          ...
+        last_payment_key_index:     The derivation index of the payment key given out to the
+                                    user.
+        api_key:                    The active API key for the account.
+        tip_filter_callback_url:    If there is a connected indexer service behind the reference
+                                    server, the user can set the url and the token for any tip
+                                    filter callbacks.
+        tip_filter_callback_token:  The API key required for the reference server to post tip
+                                    filter notifications to the given callback url.
+    """
+    # TODO(1.4.0) Database. The `active_channel_id` should be a foreign key to the payment
+    #     channels table. However I have repressed memories about the cross-foreign keys on
+    #     both tables causing issues.
     sql = f"""
     CREATE TABLE IF NOT EXISTS accounts (
-        account_id              INTEGER PRIMARY KEY,
-        flags                   INTEGER DEFAULT {AccountFlags.MID_CREATION},
-        public_key_bytes        BINARY(32),
-        active_channel_id       INTEGER DEFAULT NULL,
-        last_payment_key_index  INTEGER DEFAULT 0,
-        api_key                 TEXT NOT NULL
+        account_id                      INTEGER     PRIMARY KEY,
+        flags                           INTEGER     DEFAULT {AccountFlag.MID_CREATION},
+        public_key_bytes                BINARY(32),
+        active_channel_id               INTEGER     DEFAULT NULL,
+        last_payment_key_index          INTEGER     DEFAULT 0,
+        api_key                         TEXT        NOT NULL,
+
+        tip_filter_callback_url         TEXT        NULL,
+        tip_filter_callback_token       TEXT        NULL,
+        tip_filter_update_count         INTEGER     DEFAULT 0
     )
     """
     db.execute(sql)
@@ -149,35 +169,35 @@ def create_account(public_key_bytes: bytes, db: Optional[sqlite3.Connection]=Non
     account_id: int = cursor.lastrowid
     return account_id, api_key
 
-def deactivate_account(account_id: int, flags: AccountFlags,
+def deactivate_account(account_id: int, flags: AccountFlag,
         db: Optional[sqlite3.Connection]=None) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE accounts SET flags=flags|? WHERE account_id=?
     """
-    assert flags & AccountFlags.DISABLED_MASK != 0
+    assert flags & AccountFlag.DISABLED_MASK != 0
     db.execute(sql, (flags, account_id))
 
 @replace_db_context_with_connection
 def get_account_id_for_api_key(db: sqlite3.Connection, api_key: str) \
-        -> tuple[Optional[int], AccountFlags]:
+        -> tuple[Optional[int], AccountFlag]:
     """
     This is not indicative of whether there is an account or not as disabled accounts will
     not be matched. If the account is valid, then and only then should the account id be
     returned.
     """
     sql = "SELECT account_id, flags FROM accounts WHERE api_key=? AND flags&?=0"
-    result = db.execute(sql, (api_key, AccountFlags.DISABLED_MASK)).fetchall()
+    result = db.execute(sql, (api_key, AccountFlag.DISABLED_MASK)).fetchall()
     if len(result) == 0:
-        return None, AccountFlags.NONE
+        return None, AccountFlag.NONE
     account_id: int
-    account_flags: AccountFlags
+    account_flags: AccountFlag
     account_id, account_flags = result[0]
     return account_id, account_flags
 
 @replace_db_context_with_connection
 def get_account_id_for_public_key_bytes(db: sqlite3.Connection, public_key_bytes: bytes) \
-        -> tuple[Optional[int], AccountFlags]:
+        -> tuple[Optional[int], AccountFlag]:
     """
     If an account id is returned the caller should check the account flags before using
     that account id. An example of this is checking the DISABLED_MASK and not authorising
@@ -186,9 +206,9 @@ def get_account_id_for_public_key_bytes(db: sqlite3.Connection, public_key_bytes
     sql = "SELECT account_id, flags FROM accounts WHERE public_key_bytes = ?"
     result = db.execute(sql, (public_key_bytes,)).fetchall()
     if len(result) == 0:
-        return None, AccountFlags.NONE
+        return None, AccountFlag.NONE
     account_id: int
-    account_flags: AccountFlags
+    account_flags: AccountFlag
     account_id, account_flags = result[0]
     return account_id, account_flags
 
@@ -200,14 +220,14 @@ def get_account_metadata_for_account_id(db: sqlite3.Connection, account_id: int)
     """
     row = db.execute(sql, (account_id,)).fetchone()
     if row is None:
-        return AccountMetadata(b'', '', None, AccountFlags.NONE, 0)
+        return AccountMetadata(b'', '', None, AccountFlag.NONE, 0)
     return AccountMetadata(*row)
 
 def set_account_registered(account_id: int, db: Optional[sqlite3.Connection]=None) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
     sql = "UPDATE accounts SET flags=flags&? WHERE account_id=? AND flags&?=?"
-    cursor = db.execute(sql, (~AccountFlags.MID_CREATION, AccountFlags.MID_CREATION,
-        account_id, AccountFlags.MID_CREATION))
+    cursor = db.execute(sql, (~AccountFlag.MID_CREATION, AccountFlag.MID_CREATION,
+        account_id, AccountFlag.MID_CREATION))
     if cursor.rowcount != 1:
         raise DatabaseStateModifiedError
 
@@ -328,6 +348,40 @@ def prune_indexer_filtering(expected_flags: IndexerPushdataRegistrationFlag,
     logger.info("Pruned %d indexer filtering registrations", deletion_count)
     return deletion_count
 
+@replace_db_context_with_connection
+def read_account_indexer_metadata(db: sqlite3.Connection, account_ids: list[int]) \
+        -> list[AccountIndexerMetadata]:
+    sql = "SELECT account_id, tip_filter_callback_url, tip_filter_callback_token " \
+        "FROM accounts WHERE account_id IN ({})"
+    return read_rows_by_id(AccountIndexerMetadata, db, sql, [], account_ids)
+
+def update_account_indexer_settings_write(account_id: int, settings: dict[str, Any],
+        db: Optional[sqlite3.Connection]=None) -> dict[str, Any]:
+    """
+    This does partial updates depending on what is in `settings`.
+
+    Raises DatabaseStateModifiedError
+    """
+    assert db is not None and isinstance(db, sqlite3.Connection)
+    new_tip_filter_callback_url: Optional[str] = settings.get("tipFilterCallbackUrl", None)
+    new_tip_filter_callback_token: Optional[str] = settings.get("tipFilterCallbackToken", None)
+    sql_values: list[Any] = [ new_tip_filter_callback_url, new_tip_filter_callback_token,
+        account_id ]
+    sql = """
+        UPDATE accounts SET tip_filter_callback_url=?, tip_filter_callback_token=?
+        WHERE account_id=?
+    """
+    cursor = db.execute(sql, sql_values)
+    if cursor.rowcount != 1:
+        raise DatabaseStateModifiedError
+
+    # All existing settings should be added to the "settings object" we return.
+    return {
+        "tipFilterCallbackUrl": new_tip_filter_callback_url,
+        "tipFilterCallbackToken": new_tip_filter_callback_token,
+    }
+
+
 # SECTION: Account payment channels
 
 def create_account_payment_channel_table(db: sqlite3.Connection) -> None:
@@ -418,6 +472,9 @@ def set_payment_channel_initial_contract_transaction(channel_id: int,
         funding_value: int, funding_transaction_hash: bytes, refund_value: int,
         refund_signature_bytes: bytes, contract_transaction_bytes: bytes,
         client_payment_key_bytes: bytes, db: Optional[sqlite3.Connection]=None) -> None:
+    """
+    Raises DatabaseStateModifiedError
+    """
     assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels
@@ -435,6 +492,9 @@ def set_payment_channel_initial_contract_transaction(channel_id: int,
 def update_payment_channel_contract(channel_id: int, refund_value: int,
         refund_signature_bytes: bytes, refund_sequence: int,
         db: Optional[sqlite3.Connection]=None) -> None:
+    """
+    Raises DatabaseStateModifiedError
+    """
     assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels
@@ -449,6 +509,9 @@ def update_payment_channel_contract(channel_id: int, refund_value: int,
 def set_payment_channel_funding_transaction(channel_id: int,
         funding_transaction_bytes: bytes, funding_output_script_bytes: bytes,
         db: Optional[sqlite3.Connection]=None) -> None:
+    """
+    Raises DatabaseStateModifiedError
+    """
     assert db is not None and isinstance(db, sqlite3.Connection)
     sql = """
     UPDATE account_payment_channels

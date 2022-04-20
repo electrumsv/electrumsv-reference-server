@@ -31,7 +31,7 @@ from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
 
 if TYPE_CHECKING:
-    from ..server import ApplicationState
+    from ..application_state import ApplicationState
 
 
 logger = logging.getLogger('handlers-peer-channels')
@@ -65,7 +65,8 @@ def _auth_for_channel_token(request: web.Request,
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
     app_state: ApplicationState = request.app['app_state']
     # NOTE(hardcoded-url) Update this if updating the server URL.
-    href = f"http://{app_state.host}:{app_state.port}/api/v1/channel/{msg_box.external_id}"
+    href = f"http://{app_state.external_host}:{app_state.external_port}"+ \
+        f"/api/v1/channel/{msg_box.external_id}"
     return MsgBoxViewModelGet.from_msg_box(msg_box, href=href)
 
 

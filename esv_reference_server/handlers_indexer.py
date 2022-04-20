@@ -18,15 +18,17 @@ from aiohttp import web
 from bitcoinx import hash_to_hex_str, hex_str_to_hash
 
 from .constants import IndexerPushdataRegistrationFlag
+from . import sqlite_db
 from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
     DatabaseStateModifiedError, delete_indexer_filtering_registrations_pushdatas, \
     get_account_id_for_api_key, read_indexer_filtering_registrations_pushdatas, \
     update_indexer_filtering_registrations_pushdatas_flags
 from .types import Outpoint, outpoint_struct, tip_filter_list_struct, \
     tip_filter_registration_struct, TipFilterRegistrationEntry
+from .util.network import UrlValidationError, validate_url
 
 if TYPE_CHECKING:
-    from .server import ApplicationState
+    from .application_state import ApplicationState
 
 
 logger = logging.getLogger("handlers-indexer")
@@ -45,8 +47,8 @@ async def mirrored_indexer_call_async(request: web.Request, *,
     and exposed via the `INDEXER_URL` environment variable. This function mirrors calls made
     on reference server endpoints onto the given indexer instance.
     """
-    client_session: aiohttp.ClientSession = request.app['client_session']
     app_state: ApplicationState = request.app['app_state']
+    client_session = app_state.get_aiohttp_session()
 
     _check_indexer_connected(app_state)
 
@@ -94,23 +96,83 @@ async def indexer_get_indexer_settings(request: web.Request) -> web.Response:
     if account_id is None:
         raise web.HTTPUnauthorized()
 
-    return await mirrored_indexer_call_async(request,
-        query_params={ "account_id": str(account_id) })
+    accept_type = request.headers.get("Accept", "*/*")
+    if accept_type == "*/*":
+        accept_type = "application/json"
+    if accept_type != "application/json":
+        raise web.HTTPBadRequest(reason="invalid 'Accept', expected 'application/json', "
+            f"got '{accept_type}'")
+
+    rows = sqlite_db.read_account_indexer_metadata(app_state.database_context,
+        [ account_id ])
+    settings_object = {
+        "tipFilterCallbackUrl": rows[0].tip_filter_callback_url if len(rows) == 1 else None,
+        "tipFilterCallbackToken": rows[0].tip_filter_callback_token if len(rows) == 1 else None,
+    }
+    return web.json_response(data=settings_object)
 
 
 async def indexer_post_indexer_settings(request: web.Request) -> web.Response:
+    """
+    This updates all the values that are present, it does not touch those that are not. The
+    response will be an object with all the current indexer settings. The value in notifying the
+    indexer is primarily so that we know an account has been created there.
+
+    A flag on the user's account row is used to protect the account from corruption caused by
+    flawed clients making multiple simultaneous calls and causing race conditions.
+    """
     app_state: ApplicationState = request.app['app_state']
 
     auth_string = request.headers.get('Authorization', None)
     if auth_string is None or not auth_string.startswith("Bearer "):
         raise web.HTTPUnauthorized()
+
     api_key = auth_string[7:]
     account_id, account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
     if account_id is None:
         raise web.HTTPUnauthorized()
 
-    return await mirrored_indexer_call_async(request,
-        query_params={ "account_id": str(account_id) })
+    content_type = request.headers.get('Content-Type', 'application/json')
+    if content_type != 'application/json':
+        raise web.HTTPBadRequest(reason="Invalid 'Content-Type', expected 'application/json', "
+            f"got '{content_type}'")
+
+    accept_type = request.headers.get('Accept', 'application/json')
+    if accept_type not in ('*/*', 'application/json'):
+        raise web.HTTPBadRequest(reason="Invalid 'Accept', expected 'application/json', "
+            f"got '{accept_type}'")
+
+    settings_update_object =  await request.json()
+    if not isinstance(settings_update_object, dict):
+        raise web.HTTPBadRequest(reason="Invalid settings update object in body")
+
+    # Apply some validation to the provided tip filter settings.
+    new_tip_filter_callback_url: Optional[str] = \
+        settings_update_object.get("tipFilterCallbackUrl", None)
+    new_tip_filter_callback_token: Optional[str] = \
+        settings_update_object.get("tipFilterCallbackToken", None)
+
+    if new_tip_filter_callback_url is not None:
+        if not isinstance(new_tip_filter_callback_url, str):
+            raise web.HTTPBadRequest(reason="Invalid tip filter callback url")
+        new_tip_filter_callback_url = new_tip_filter_callback_url.strip()
+
+        # This enforces URL correctness, including limiting the schemes to http/https.
+        try:
+            validate_url(new_tip_filter_callback_url, allow_path=True, allow_query=True)
+        except UrlValidationError as e:
+            raise web.HTTPBadRequest(reason=f"Invalid tip filter callback url {e.args[0]}")
+
+        # If the string strip operation made a difference, keep that difference in the update.
+        settings_update_object["tipFilterCallbackUrl"] = new_tip_filter_callback_url
+    else:
+        if new_tip_filter_callback_token is not None:
+            raise web.HTTPBadRequest(reason="Tip filter callback token provided without url")
+
+    settings_object = await app_state.database_context.run_in_thread_async(
+        sqlite_db.update_account_indexer_settings_write, account_id, settings_update_object)
+
+    return web.json_response(data=settings_object)
 
 
 async def indexer_post_restoration_search(request: web.Request) -> web.Response:
