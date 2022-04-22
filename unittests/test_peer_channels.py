@@ -14,7 +14,6 @@ except ModuleNotFoundError:
     # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
-from typing import TYPE_CHECKING
 
 import aiohttp
 from aiohttp import web, WSServerHandshakeError

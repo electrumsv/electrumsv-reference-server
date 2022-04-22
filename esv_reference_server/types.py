@@ -133,3 +133,21 @@ class AccountIndexerMetadata(NamedTuple):
     account_id: int
     tip_filter_callback_url: Optional[str]
     tip_filter_callback_token: Optional[str]
+
+
+class TipFilterNotificationMatch(TypedDict):
+    pushDataHashHex: str
+    transactionId: str
+    transactionIndex: int
+    flags: int
+
+
+class TipFilterNotificationEntry(TypedDict):
+    accountId: int
+    matches: list[TipFilterNotificationMatch]
+
+
+class TipFilterNotificationBatch(TypedDict):
+    blockId: Optional[str]
+    entries: list[TipFilterNotificationEntry]
+
