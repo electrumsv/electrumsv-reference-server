@@ -89,7 +89,7 @@ async def main() -> None:
             # HeaderSV
             # NOTE: remember to set:
             #   EXPOSE_HEADER_SV_APIS=1 &
-            #   HEADER_SV_URL=http://localhost:8080 in .env file
+            #   HEADER_SV_URL=http://localhost:33444 in .env file
             await client.subscribe_to_headers_notifications(REGTEST_VALID_ACCOUNT_TOKEN)
 
             # # Peer Channels

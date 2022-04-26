@@ -96,7 +96,7 @@ These endpoints will become activated if there is a running instance of
 and the system administrator has set these environment variables:
 
     EXPOSE_HEADER_SV_APIS=1
-    HEADER_SV_URL=http://localhost:8080
+    HEADER_SV_URL=http://localhost:33444
 
 These environment variables will essentially cause ElectrumSV-Reference-Server to
 act as a secure reverse proxy for HeaderSV APIs. The `.env` file at the

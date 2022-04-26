@@ -229,7 +229,7 @@ def run_server() -> Generator[ApplicationState, None, None]:
     os.environ['INTERNAL_PORT'] = str(TEST_INTERNAL_PORT)
     os.environ['NETWORK'] = "regtest"
     os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
-    os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:8080'
+    os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:33444'
     os.environ['EXPOSE_INDEXER_APIS'] = '0'
     os.environ['INDEXER_URL'] = 'http://127.0.0.1:49241'
     os.environ['SKIP_DOTENV_FILE'] = '1'
