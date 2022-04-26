@@ -55,13 +55,13 @@ class MsgBoxSQLiteRepository:
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id    BIGINT             NOT NULL,
                 externalid    VARCHAR(1024)      NOT NULL,
-                publicread    boolean,
-                publicwrite   boolean,
-                locked        boolean,
-                sequenced     boolean,
-                minagedays    INT,
-                maxagedays    INT,
-                autoprune     boolean,
+                publicread    INTEGER,
+                publicwrite   INTEGER,
+                locked        INTEGER,
+                sequenced     INTEGER,
+                minagedays    INTEGER,
+                maxagedays    INTEGER,
+                autoprune     INTEGER,
 
                 UNIQUE (externalid),
                 FOREIGN KEY(account_id) REFERENCES accounts(account_id)
@@ -80,9 +80,9 @@ class MsgBoxSQLiteRepository:
                 msg_box_id    BIGINT             NOT NULL,
 
                 seq           BIGINT             NOT NULL,
-                receivedts    TIMESTAMP          NOT NULL,
+                receivedts    TEXT               NOT NULL,
                 contenttype   VARCHAR(64)        NOT NULL,
-                payload       BYTEA,
+                payload       BLOB,
 
                 UNIQUE (msg_box_id, seq),
                 FOREIGN KEY (fromtoken) REFERENCES msg_box_api_token (id),
@@ -99,8 +99,8 @@ class MsgBoxSQLiteRepository:
                 message_id    BIGINT             NOT NULL,
                 token_id      BIGINT             NOT NULL,
 
-                isread        boolean            NOT NULL,
-                isdeleted     boolean            NOT NULL,
+                isread        INTEGER            NOT NULL,
+                isdeleted     INTEGER            NOT NULL,
 
                 FOREIGN KEY (message_id) REFERENCES message (id),
                 FOREIGN KEY (token_id) REFERENCES msg_box_api_token (id)
@@ -118,10 +118,10 @@ class MsgBoxSQLiteRepository:
 
               token		            VARCHAR(1024),
               description           VARCHAR(1024),
-              canread               boolean,
-              canwrite              boolean,
-              validfrom             TIMESTAMP          NOT NULL,
-              validto               TIMESTAMP,
+              canread               INTEGER,
+              canwrite              INTEGER,
+              validfrom             TEXT               NOT NULL,
+              validto               TEXT,
 
               UNIQUE (token),
               FOREIGN KEY (account_id) REFERENCES accounts (account_id),

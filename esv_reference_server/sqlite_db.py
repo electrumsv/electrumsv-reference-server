@@ -400,7 +400,7 @@ def create_account_payment_channel_table(db: sqlite3.Connection) -> None:
         funding_transaction_bytes   BLOB DEFAULT NULL,
         funding_transaction_hash    BINARY(32) DEFAULT NULL,
         funding_output_script_bytes BLOB DEFAULT NULL,
-        contract_transaction_bytes    BLOB DEFAULT NULL,
+        contract_transaction_bytes  BLOB DEFAULT NULL,
         refund_signature_bytes      BLOB DEFAULT NULL,
         client_payment_key_bytes    BINARY(32) DEFAULT NULL,
         prepaid_balance_value       INTEGER DEFAULT 0,
