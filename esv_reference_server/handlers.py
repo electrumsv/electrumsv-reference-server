@@ -15,6 +15,7 @@ import aiohttp
 from aiohttp import web
 from bitcoinx import P2MultiSig_Output, Signature
 
+from .errors import APIErrors
 from .keys import generate_payment_public_key, \
     VerifiableKeyData, verify_key_data
 from .constants import AccountFlag, ChannelState, EXTERNAL_SERVER_HOST, EXTERNAL_SERVER_PORT
@@ -194,7 +195,7 @@ async def post_account_channel(request: web.Request) -> web.Response:
 
     auth_string = request.headers.get('Authorization', None)
     if auth_string is None or not auth_string.startswith("Bearer "):
-        raise web.HTTPBadRequest(reason="No 'Bearer' authentication")
+        raise web.HTTPBadRequest(reason="No 'Bearer' authentication.")
 
     api_key = auth_string[7:]
     account_id, _account_flags = get_account_id_for_api_key(app_state.database_context, api_key)
@@ -204,12 +205,14 @@ async def post_account_channel(request: web.Request) -> web.Response:
 
     channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.PAYMENT_KEY_DISPENSED:
-        raise web.HTTPBadRequest(reason="Channel invalid")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.PAYMENT_CHANNEL_INVALID}: "
+                                        "Channel invalid.")
 
     # Request processing.
     funding_value_text = request.query.get("funding_value")
     if funding_value_text is None:
-        raise web.HTTPBadRequest(reason="Missing 'funding_value' parameter")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_QUERY_PARAM}: "
+                                        "Missing 'funding_value' parameter")
     funding_value = int(funding_value_text)
 
     funding_p2ms: Optional[P2MultiSig_Output] = None
@@ -221,16 +224,20 @@ async def post_account_channel(request: web.Request) -> web.Response:
             funding_p2ms = process_funding_script(funding_script_bytes,
                 channel_row.payment_key_bytes)
             if funding_p2ms is None:
-                raise web.HTTPBadRequest(reason="Invalid 'script' multipart payload")
+                code = APIErrors.INVALID_MULTIPART_PAYLOAD
+                raise web.HTTPBadRequest(reason=f"{code}: Invalid 'script' multipart")
         elif part_reader.name == "transaction":
             contract_transaction_bytes = await part_reader.read(decode=True)
         else:
             part_name = part_reader.name or "?"
-            raise web.HTTPBadRequest(reason=f"Invalid '{part_name}' multipart")
+            code = APIErrors.INVALID_MULTIPART_PAYLOAD
+            raise web.HTTPBadRequest(reason=f"{code}: Invalid '{part_name}' multipart")
     if not funding_script_bytes:
-        raise web.HTTPBadRequest(reason="Missing the 'script' multipart payload")
+        code = APIErrors.MISSING_MULTIPART_PAYLOAD
+        raise web.HTTPBadRequest(reason=f"{code}: Missing the 'script' multipart payload")
     if not contract_transaction_bytes:
-        raise web.HTTPBadRequest(reason="Missing the 'transaction' multipart payload")
+        code = APIErrors.MISSING_MULTIPART_PAYLOAD
+        raise web.HTTPBadRequest(reason=f"{code}: Missing the 'transaction' multipart payload")
     assert funding_p2ms is not None
 
     delivery_time = int(time.time())
@@ -244,7 +251,7 @@ async def post_account_channel(request: web.Request) -> web.Response:
                 contract_transaction_bytes, delivery_time, funding_value, funding_p2ms,
                 app_state.server_keys, account_metadata, channel_row)
     except InvalidTransactionError as exc:
-        raise web.HTTPBadRequest(reason=exc.args[0])
+        raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_TRANSACTION}: {exc.args[0]}")
 
     await app_state.database_context.run_in_thread_async(
         set_payment_channel_initial_contract_transaction, channel_row.channel_id,
@@ -272,12 +279,14 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
 
     channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.CONTRACT_OPEN:
-        raise web.HTTPBadRequest(reason="Channel invalid")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.PAYMENT_CHANNEL_INVALID}: "
+                                        "Channel invalid.")
 
     # Request processing.
     refund_value_text = request.query.get("refund_value")
     if refund_value_text is None:
-        raise web.HTTPBadRequest(reason="Missing 'refund_value' parameter")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_QUERY_PARAM}: "
+                                        "Missing 'refund_value' query parameter.")
     refund_value = int(refund_value_text)
 
     refund_signature_bytes = b""
@@ -285,12 +294,15 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
         if part_reader.name == "signature":
             refund_signature_bytes = await part_reader.read(decode=True)
             if Signature.analyze_encoding(refund_signature_bytes) == 0:
-                raise web.HTTPBadRequest(reason="Invalid signature")
+                raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_MULTIPART_PAYLOAD}: "
+                                                "Invalid signature")
         else:
             part_name = part_reader.name or "?"
-            raise web.HTTPBadRequest(reason=f"Invalid '{part_name}' multipart")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_MULTIPART_PAYLOAD}: "
+                                            f"Invalid '{part_name}' multipart")
     if not refund_signature_bytes:
-        raise web.HTTPBadRequest(reason="Missing the 'signature' multipart payload")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_MULTIPART_PAYLOAD}: "
+                                        "Missing the 'signature' multipart payload")
 
     try:
         new_refund_sequence = await process_contract_update_async(refund_signature_bytes,
@@ -301,13 +313,14 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
         # in establishing the initial full refund contract.
         await app_state.database_context.run_in_thread_async(deactivate_account, account_id,
             AccountFlag.DISABLED_FLAGGED)
-        raise web.HTTPNotAcceptable(reason=exc.args[0])
+        raise web.HTTPNotAcceptable(reason=f"{APIErrors.BROKEN_PAYMENT_CHANNEL}: {exc.args[0]}")
 
     try:
         await app_state.database_context.run_in_thread_async(update_payment_channel_contract,
             channel_row.channel_id, refund_value, refund_signature_bytes, new_refund_sequence)
     except DatabaseStateModifiedError:
-        raise web.HTTPBadRequest(reason="Channel state inconsistency")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.CHANNEL_STATE_INCONSISTENCY}: "
+                                        "Channel state inconsistency")
 
     # If this is the first time the client has given us a payment through the payment channel
     # then we change their account from one that is mid creation to one that is registered.
@@ -315,7 +328,8 @@ async def put_account_channel_update(request: web.Request) -> web.Response:
         try:
             await app_state.database_context.run_in_thread_async(set_account_registered, account_id)
         except DatabaseStateModifiedError:
-            raise web.HTTPBadRequest(reason="Account inconsistency")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.ACCOUNT_STATE_INCONSISTENCY}: "
+                                            "Account inconsistency")
 
     return web.Response()
 
@@ -339,7 +353,8 @@ async def post_account_funding(request: web.Request) -> web.Response:
 
     channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.REFUND_ESTABLISHED:
-        raise web.HTTPBadRequest(reason="Channel invalid")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.PAYMENT_CHANNEL_INVALID}: "
+                                        "Channel invalid.")
 
     funding_transaction_bytes = b""
     async for part_reader in await request.multipart():
@@ -347,9 +362,11 @@ async def post_account_funding(request: web.Request) -> web.Response:
             funding_transaction_bytes = await part_reader.read(decode=True)
         else:
             part_name = part_reader.name or "?"
-            raise web.HTTPBadRequest(reason=f"Invalid '{part_name}' multipart")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_MULTIPART_PAYLOAD}: "
+                                            f"Invalid '{part_name}' multipart")
     if not funding_transaction_bytes:
-        raise web.HTTPBadRequest(reason="Missing the 'transaction' multipart payload")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_MULTIPART_PAYLOAD}: "
+                                        "Missing the 'transaction' multipart payload")
 
     try:
         funding_output_script_bytes = await process_funding_transaction_async(
@@ -357,14 +374,14 @@ async def post_account_funding(request: web.Request) -> web.Response:
     except BrokenChannelError as exc:
         await app_state.database_context.run_in_thread_async(set_payment_channel_closed,
             channel_row.channel_id, ChannelState.CLOSED_INVALID_FUNDING_TRANSACTION)
-        raise web.HTTPNotAcceptable(reason=exc.args[0])
+        raise web.HTTPNotAcceptable(reason=f"{APIErrors.BROKEN_PAYMENT_CHANNEL}: {exc.args[0]}")
 
     try:
         await mapi_broadcast_transaction(app_state.network, funding_transaction_bytes)
     except (aiohttp.ClientError, networks.NetworkError) as exc:
         await app_state.database_context.run_in_thread_async(set_payment_channel_closed,
             channel_row.channel_id, ChannelState.CLOSED_BROADCASTING_FUNDING_TRANSACTION)
-        raise web.HTTPNotAcceptable(reason=exc.args[0])
+        raise web.HTTPNotAcceptable(reason=f"{APIErrors.MAPI_BROADCAST_FAILURE}: {exc.args[0]}")
 
     # TODO(utxo-spends) We should register for the spend of the funding output and react to it.
 
@@ -373,7 +390,8 @@ async def post_account_funding(request: web.Request) -> web.Response:
             set_payment_channel_funding_transaction, channel_row.channel_id,
             funding_transaction_bytes, funding_output_script_bytes)
     except DatabaseStateModifiedError:
-        raise web.HTTPBadRequest(reason="Channel state inconsistency")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.CHANNEL_STATE_INCONSISTENCY}: "
+                                        f"Channel state inconsistency")
 
     return web.Response()
 
@@ -396,11 +414,13 @@ async def delete_account_channel(request: web.Request) -> web.Response:
 
     channel_row = get_active_channel_for_account_id(app_state.database_context, account_id)
     if channel_row is None or channel_row.channel_state != ChannelState.REFUND_ESTABLISHED:
-        raise web.HTTPBadRequest(reason="Channel invalid")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.PAYMENT_CHANNEL_INVALID}: "
+                                        f"Channel invalid.")
 
     refund_value_str = request.query.get("refund_value")
     if refund_value_str is None:
-        raise web.HTTPBadRequest(reason="Missing 'refund_value' parameter")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_QUERY_PARAM}: "
+                                        "Missing 'refund_value' parameter")
     refund_value = int(refund_value_str)
 
     refund_signature_bytes = b""
@@ -408,12 +428,16 @@ async def delete_account_channel(request: web.Request) -> web.Response:
         if part_reader.name == "signature":
             refund_signature_bytes = await part_reader.read(decode=True)
             if Signature.analyze_encoding(refund_signature_bytes) == 0:
-                raise web.HTTPBadRequest(reason="Invalid signature")
+                raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_MULTIPART_PAYLOAD}: "
+                                                "Invalid signature")
         else:
             part_name = part_reader.name or "?"
-            raise web.HTTPBadRequest(reason=f"Invalid '{part_name}' multipart")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_MULTIPART_PAYLOAD}: "
+                                            f"Invalid '{part_name}' multipart")
+
     if not refund_signature_bytes:
-        raise web.HTTPBadRequest(reason="Missing the 'signature' multipart payload")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_MULTIPART_PAYLOAD}: "
+                                        f"Missing the 'signature' multipart payload")
 
     account_metadata = await app_state.database_context.run_in_thread_async(
             get_account_metadata_for_account_id, account_id)
@@ -429,7 +453,7 @@ async def delete_account_channel(request: web.Request) -> web.Response:
         #   - It could be because the fee was not high enough.
         #   - It could be because the transaction structure is invalid and we checked it wrong.
         #   - It could be because ???
-        raise web.HTTPNotAcceptable(reason=exc.args[0])
+        raise web.HTTPNotAcceptable(reason=f"{APIErrors.MAPI_BROADCAST_FAILURE}: {exc.args[0]}")
 
     return web.Response()
 

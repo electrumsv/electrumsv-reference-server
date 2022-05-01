@@ -17,12 +17,13 @@ from datetime import datetime
 
 from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
 
-from .. import errors, utils
-from ..errors import Error
+from .. import utils
+from ..errors import APIErrors
 from . import models, view_models
 from .models import MsgBox, MsgBoxAPIToken, MessageMetadata, Message
 from .view_models import APITokenViewModelGet, MessageViewModelGetJSON, \
-    MessageViewModelGetBinary, MsgBoxViewModelAmend
+    MessageViewModelGetBinary, MsgBoxViewModelAmend, MessageViewModelGet
+
 
 # TODO - add indexes on relevant columns (beyond primary keys and foreign keys)
 
@@ -474,10 +475,11 @@ class MsgBoxSQLiteRepository:
             return cast(int, rows[0][0])
         return read(self._database_context)
 
-    def write_message(self, message: Message) -> tuple[int, view_models.MessageViewModelGet]:
+    def write_message(self, message: Message) \
+            -> tuple[Optional[tuple[int, MessageViewModelGet]], Optional[APIErrors]]:
         """Returns an error code and error reason"""
         def write(db: Optional[sqlite3.Connection]=None) \
-                -> tuple[int, view_models.MessageViewModelGet]:
+                -> tuple[Optional[tuple[int, MessageViewModelGet]], Optional[APIErrors]]:
             assert db is not None and isinstance(db, sqlite3.Connection)
             # Translating this query from postgres -> SQLite
             # The "FOR UPDATE" lock can be dropped because SQLite does broad-brush/global db locking
@@ -493,16 +495,12 @@ class MsgBoxSQLiteRepository:
             if len(rows) != 0:
                 locked, sequenced = rows[0]
                 if locked:
-                    error_code = errors.ChannelLocked.status
-                    error_reason = errors.ChannelLocked.reason
-                    raise Error(reason=error_reason, status=error_code)
+                    return None, APIErrors.CHANNEL_LOCKED
 
                 if sequenced:
                     unreadCount = self.get_unread_messages_count(db, message.msg_box_api_token_id)
                     if unreadCount > 0:
-                        error_code = errors.SequencingFailure.status
-                        error_reason = errors.SequencingFailure.reason
-                        raise Error(reason=error_reason, status=error_code)
+                        return None, APIErrors.SEQUENCING_FAILURE
 
             sql = """
                 INSERT INTO message (fromtoken, msg_box_id, seq, receivedts, contenttype, payload)
@@ -528,7 +526,7 @@ class MsgBoxSQLiteRepository:
                 self.logger.debug("Wrote message sequence: %s for msg_box_id: %s",
                     seq, msg_box_id)
             else:
-                raise Error(reason="Failed to insert message", status=500)
+                return None, APIErrors.DATABASE_WRITE_FAILURE
 
             sql = """
                 INSERT INTO message_status
@@ -545,7 +543,8 @@ class MsgBoxSQLiteRepository:
             """
             params3 = (message_id, fromtoken, msg_box_id)
             db.execute(sql, params3)
-            return message_id, message_view_model_get
+            result = (message_id, message_view_model_get)
+            return result, None
         return self._database_context.run_in_thread(write)
 
     def get_unread_messages_count(self, db: sqlite3.Connection, msg_box_api_token_id: int) -> int:

@@ -10,7 +10,7 @@ from aiohttp.web_ws import WebSocketResponse
 from bitcoinx import pack_header, double_sha256, hash_to_hex_str, \
     hex_str_to_hash
 
-from esv_reference_server.errors import Error
+from esv_reference_server.errors import Error, APIErrors
 from esv_reference_server.types import HeadersWSClient, HeaderSVTip
 
 if typing.TYPE_CHECKING:
@@ -26,7 +26,8 @@ async def get_header(request: web.Request) -> web.Response:
     accept_type = request.headers.get('Accept', 'application/json')
     blockhash = request.match_info.get('hash')
     if not blockhash:
-        raise web.HTTPBadRequest(reason="'hash' path parameter not supplied")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_PATH_PARAMETER}: "
+                                        f"'hash' path parameter not supplied")
 
     try:
         url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{blockhash}"

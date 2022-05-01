@@ -7,10 +7,11 @@ from typing import cast, TYPE_CHECKING
 import uuid
 
 import aiohttp
-from aiohttp import web, web_exceptions
+from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse
 
 from . import sqlite_db
+from .errors import APIErrors
 from .types import AccountWebsocketState, AccountWebsocketMediaType
 
 if TYPE_CHECKING:
@@ -35,16 +36,13 @@ class GeneralWebSocket(web.View):
         # Note this bearer token is the account-specific one
         api_key = self.request.query.get('token', None)
         if api_key is None:
-            raise web_exceptions.HTTPBadRequest(
-                reason="Missing 'token' query parameter (requires master bearer token)")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_QUERY_PARAM}: Missing "
+                "'token' query parameter (requires master bearer token).")
 
         account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
             app_state.database_context, api_key)
         if account_id is None:
-            raise web_exceptions.HTTPUnauthorized(
-                reason="Unauthorized - Invalid Token "
-                        "(example: ?token=t80Dp_dIk1kqkHK3P9R5cpDf67JfmNixNscexEYG0"
-                        "_xaCbYXKGNm4V_2HKr68ES5bytZ8F19IS0XbJlq41accQ==)")
+            raise web.HTTPUnauthorized()
 
         ws_id = str(uuid.uuid4())
         accept_type_text = self.request.headers.get('Accept', 'application/json')
