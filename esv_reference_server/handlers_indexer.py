@@ -25,7 +25,8 @@ from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
     update_indexer_filtering_registrations_pushdatas_flags
 from .types import Outpoint, outpoint_struct, tip_filter_list_struct, \
     tip_filter_registration_struct, TipFilterRegistrationEntry
-from .util.network import UrlValidationError, validate_url
+from .util.network import TokenValidationError, UrlValidationError, \
+    validate_authorization_header, validate_url
 
 if TYPE_CHECKING:
     from .application_state import ApplicationState
@@ -162,6 +163,12 @@ async def indexer_post_indexer_settings(request: web.Request) -> web.Response:
             validate_url(new_tip_filter_callback_url, allow_path=True, allow_query=True)
         except UrlValidationError as e:
             raise web.HTTPBadRequest(reason=f"Invalid tip filter callback url {e.args[0]}")
+
+        if new_tip_filter_callback_token is not None:
+            try:
+                validate_authorization_header(new_tip_filter_callback_token)
+            except TokenValidationError as e:
+                raise web.HTTPBadRequest(reason=f"Invalid tip filter callback url {e.args[0]}")
 
         # If the string strip operation made a difference, keep that difference in the update.
         settings_update_object["tipFilterCallbackUrl"] = new_tip_filter_callback_url

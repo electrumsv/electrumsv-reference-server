@@ -7,7 +7,7 @@ from typing import Any, Literal, NamedTuple, Optional, TypedDict, Union
 from aiohttp import web
 from bitcoinx import hash_to_hex_str
 
-from .constants import AccountMessageKind
+from .constants import AccountMessageKind, OutboundDataFlag
 
 if typing.TYPE_CHECKING:
     from .msg_box.models import MsgBox
@@ -151,3 +151,45 @@ class TipFilterNotificationBatch(TypedDict):
     blockId: Optional[str]
     entries: list[TipFilterNotificationEntry]
 
+
+# This matches the structure of the same name in ElectrumSV.
+class TipFilterPushDataMatchesData(TypedDict):
+    blockId: Optional[str]
+    matches: list[TipFilterNotificationMatch]
+
+
+class OutboundDataRow(NamedTuple):
+    outbound_data_id: Optional[int]
+    account_id: int
+    outbound_data: bytes
+    outbound_data_hash: bytes
+    outbound_data_flags: OutboundDataFlag
+    content_type: str
+    date_created: int
+
+
+class OutboundDataCreatedRow(NamedTuple):
+    outbound_data_id: int
+    account_id: int
+    outbound_data_hash: bytes
+
+
+class OutboundDataPendingRow(NamedTuple):
+    outbound_data_id: int
+    account_id: int
+    outbound_data: bytes
+    outbound_data_flags: OutboundDataFlag
+    content_type: str
+    date_created: int
+    tip_filter_callback_url: Optional[str]
+    tip_filter_callback_token: Optional[str]
+
+
+class OutboundDataLogRow(NamedTuple):
+    account_id: int
+    outbound_data_id: Optional[int]
+    # We need this for when and if the `outbound_data` row is pruned.
+    outbound_data_flags: OutboundDataFlag
+    response_status_code: Optional[int]
+    response_reason: Optional[str]
+    date_created: int

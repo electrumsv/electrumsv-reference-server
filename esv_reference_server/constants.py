@@ -89,3 +89,12 @@ class IndexerPushdataRegistrationFlag(IntFlag):
     MASK_FINALISED_CLEAR            = ~FINALISED
     MASK_FINALISED_DELETING_CLEAR   = ~(FINALISED | DELETING)
 
+
+class OutboundDataFlag(IntFlag):
+    NONE                                    = 0
+
+    TIP_FILTER_NOTIFICATIONS                = 1 << 0
+
+    DISPATCH_NO_CALLBACK                    = 1 << 18
+    DISPATCH_EXCEPTION                      = 1 << 19
+    DISPATCHED_SUCCESSFULLY                 = 1 << 20

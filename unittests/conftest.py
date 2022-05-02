@@ -232,6 +232,7 @@ def run_server() -> Generator[ApplicationState, None, None]:
     os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:33444'
     os.environ['EXPOSE_INDEXER_APIS'] = '0'
     os.environ['INDEXER_URL'] = 'http://127.0.0.1:49241'
+    os.environ['ENABLE_OUTBOUND_DATA_DELIVERY'] = '0'
     os.environ['SKIP_DOTENV_FILE'] = '1'
     os.environ['REFERENCE_SERVER_RESET'] = '0'
     os.environ['REFERENCE_SERVER_DATA_PATH'] = str(data_path)

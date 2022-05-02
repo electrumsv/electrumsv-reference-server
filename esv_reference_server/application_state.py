@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from http import HTTPStatus
 import json
 import logging
 import os
 from pathlib import Path
 import struct
 import threading
+import time
 from typing import Optional
 import weakref
 
@@ -27,17 +29,27 @@ except ModuleNotFoundError:
     import sqlite3  # type: ignore
 
 
-from .constants import ACCOUNT_MESSAGE_NAMES, Network
+from .constants import ACCOUNT_MESSAGE_NAMES, Network, OutboundDataFlag
 from .indexer_support import maintain_indexer_connection_async, unregister_unwanted_spent_outputs
 from .keys import create_regtest_server_keys, ServerKeys
 from .msg_box.repositories import MsgBoxSQLiteRepository
 from . import sqlite_db
 from .types import AccountMessage, AccountWebsocketState, GeneralNotification, \
-    HeadersWSClient, MsgBoxWSClient, Outpoint, PushNotification
+    HeadersWSClient, MsgBoxWSClient, OutboundDataLogRow, OutboundDataPendingRow, Outpoint, \
+    PushNotification
 from .utils import pack_account_message_bytes
 
 
 logger = logging.getLogger("app-state")
+
+
+# NOTE(rt12) Futures generally swallow exceptions and propagate them to the callbacks. If there
+# are no callbacks the exceptions just get swallowed. Terrible design flaw, they should log the
+# exceptions if there are no callbacks as ERROR level.
+def asyncio_task_callback(future: asyncio.Task[None]) -> None:
+    if future.cancelled():
+        return
+    future.result()
 
 
 class ApplicationState(object):
@@ -108,6 +120,7 @@ class ApplicationState(object):
         self._account_notifications_task: Optional[asyncio.Task[None]] = None
         self._message_box_notifications_task: Optional[asyncio.Task[None]] = None
         self._header_notifications_task: Optional[asyncio.Task[None]] = None
+        self._outbound_data_delivery_future: Optional[asyncio.Future[None]] = None
 
         # Indexer-related state.
         self._indexer_task: Optional[asyncio.Task[None]] = None
@@ -130,6 +143,9 @@ class ApplicationState(object):
         if os.getenv("EXPOSE_INDEXER_APIS", "0") == "1":
             self._indexer_task = asyncio.create_task(maintain_indexer_connection_async(self))
 
+            if os.getenv("ENABLE_OUTBOUND_DATA_DELIVERY", "0") == "1":
+                self._outbound_data_delivery_future = self._create_outbound_delivery_task()
+
     async def teardown_async(self) -> None:
         self._exit_event.set()
 
@@ -141,6 +157,8 @@ class ApplicationState(object):
             self._header_notifications_task.cancel()
         if self._indexer_task is not None:
             self._indexer_task.cancel()
+        if self._outbound_data_delivery_future is not None:
+            self._outbound_data_delivery_future.cancel()
 
         self.logger.info("Closing HTTP sessions")
         await self.aiohttp_session.close()
@@ -170,6 +188,93 @@ class ApplicationState(object):
         if startup_complete:
             self.singleton_event.set()
         await self._exit_event.wait()
+
+    def _create_outbound_delivery_task(self) -> asyncio.Task[None]:
+        task = asyncio.create_task(self._attempt_outbound_data_delivery_task())
+        task.add_done_callback(asyncio_task_callback)
+        return task
+
+    async def _attempt_outbound_data_delivery_task(self) -> None:
+        """
+        Non-blocking delivery of new tip filter notifications.
+        """
+        self.logger.debug("Starting outbound data delivery task")
+        MAXIMUM_DELAY = 120.0
+        while True:
+            # No point in trying if there is no reference server connected.
+            next_check_delay = MAXIMUM_DELAY
+            rows = sqlite_db.read_pending_outbound_datas(self.database_context,
+                OutboundDataFlag.NONE, OutboundDataFlag.DISPATCHED_SUCCESSFULLY)
+            current_rows = list[OutboundDataPendingRow]()
+            if len(rows) > 0:
+                current_time = time.time()
+                for row in rows:
+                    if row.date_created + MAXIMUM_DELAY > current_time:
+                        next_check_delay = (row.date_created + MAXIMUM_DELAY) - current_time
+                        break
+                    current_rows.append(row)
+
+            self.logger.debug("Outbound data delivery of %d entries, next delay will be %0.2f",
+                len(current_rows), next_check_delay)
+
+            date_created = int(time.time())
+            log_creation_rows = list[OutboundDataLogRow]()
+            flag_data_updates = list[tuple[OutboundDataFlag, int]]()
+            for row in current_rows:
+                assert row.outbound_data_id is not None
+                if row.tip_filter_callback_url is None:
+                    log_creation_rows.append(OutboundDataLogRow(
+                        row.account_id, row.outbound_data_id,
+                        row.outbound_data_flags | OutboundDataFlag.DISPATCH_NO_CALLBACK,
+                        None, None, date_created))
+                else:
+                    url = row.tip_filter_callback_url
+                    headers = {
+                        "Content-Type":     row.content_type,
+                    }
+                    if row.tip_filter_callback_token is not None:
+                        headers["Authorization"] = row.tip_filter_callback_token
+                    batch_text = row.outbound_data.decode("utf-8")
+                    updated_flags = row.outbound_data_flags
+                    try:
+                        async with self.aiohttp_session.post(url, headers=headers,
+                                data=batch_text) as response:
+                            if response.status == HTTPStatus.OK:
+                                self.logger.debug("Posted outbound data for account %d to '%s' "+
+                                    "status=%s, reason=%s", row.account_id, url, response.status,
+                                    response.reason)
+                                updated_flags |= OutboundDataFlag.DISPATCHED_SUCCESSFULLY
+                                flag_data_updates.append((updated_flags, row.outbound_data_id))
+                                log_creation_rows.append(OutboundDataLogRow(
+                                    row.account_id, row.outbound_data_id, row.outbound_data_flags,
+                                    response.status, response.reason, date_created))
+                            else:
+                                self.logger.error("Failed to post outbound data for account %d "+
+                                    "to '%s' status=%s, reason=%s", row.account_id, url,
+                                    response.status, response.reason)
+                                log_creation_rows.append(OutboundDataLogRow(
+                                    row.account_id, row.outbound_data_id, row.outbound_data_flags,
+                                    response.status, response.reason, date_created))
+                    except aiohttp.ClientError:
+                        self.logger.exception("Errored posting outbound data for account %d to "
+                            "'%s'", row.account_id, url)
+                        # We should work out what exceptions are normal (e.g. invalid URL) and
+                        # just add a flag for those. The rest of the exceptions should be in the
+                        # log (or redirected to some sys admin notification mechanism).
+                        log_creation_rows.append(OutboundDataLogRow(
+                            row.account_id, row.outbound_data_id,
+                            row.outbound_data_flags | OutboundDataFlag.DISPATCH_EXCEPTION,
+                            None, None, date_created))
+
+            if len(log_creation_rows) > 0:
+                await self.database_context.run_in_thread_async(
+                    sqlite_db.create_outbound_data_logs_write, log_creation_rows)
+
+            if len(flag_data_updates) > 0:
+                await self.database_context.run_in_thread_async(
+                    sqlite_db.update_outbound_data_flags_write, flag_data_updates)
+
+            await asyncio.sleep(next_check_delay)
 
     # Headers Websocket Client Get/Add/Remove & Notify thread
     def get_headers_ws_clients(self) -> dict[str, HeadersWSClient]:

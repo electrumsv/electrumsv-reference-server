@@ -1,6 +1,30 @@
+# Copyright(c) 2022 Bitcoin Association.
+# Distributed under the Open BSV software license, see the accompanying file LICENSE
+#
+# The goal of this file is to allow non-public applications to have access to a secure API.
+
 import re
 from typing import Optional, Set
 import urllib.parse
+
+
+class TokenValidationError(Exception):
+    ...
+
+
+AUTHORIZATION_HEADER_VALUE_REGEX = re.compile("^[ -~]+$", re.ASCII)
+
+
+def validate_authorization_header(text: str) -> None:
+    stripped_text = text.replace(" ", "")
+    if len(stripped_text) < 8:
+        raise TokenValidationError(f"Got {len(stripped_text)} non-whitespace characters, "
+            f"expected {8}+")
+    match = AUTHORIZATION_HEADER_VALUE_REGEX.match(text)
+    if match is None:
+        raise TokenValidationError("Failed header value validation")
+
+
 
 ## The following code (albeit modified) is from the given URL and their license applies.
 ##   https://stackoverflow.com/a/55827638

@@ -32,12 +32,14 @@ except ModuleNotFoundError:
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
 import time
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple, Optional, Sequence
 
-from electrumsv_database.sqlite import read_rows_by_id, replace_db_context_with_connection
+from electrumsv_database.sqlite import bulk_insert_returning, read_rows_by_id, \
+    replace_db_context_with_connection
 
-from .constants import AccountFlag, ChannelState, IndexerPushdataRegistrationFlag
-from .types import AccountIndexerMetadata, TipFilterListEntry, TipFilterRegistrationEntry
+from .constants import AccountFlag, ChannelState, IndexerPushdataRegistrationFlag, OutboundDataFlag
+from .types import AccountIndexerMetadata, OutboundDataLogRow, OutboundDataCreatedRow, \
+    OutboundDataPendingRow, OutboundDataRow, TipFilterListEntry, TipFilterRegistrationEntry
 from .utils import create_account_api_token
 
 _ = """
@@ -46,6 +48,8 @@ Useful regexes for searching codebase:
 """
 
 logger = logging.getLogger("app-database")
+
+
 
 class AccountMetadata(NamedTuple):
     # The identity public key for this client.
@@ -101,8 +105,12 @@ def create_tables(db: sqlite3.Connection) -> None:
     create_account_table(db)
     create_account_payment_channel_table(db)
     create_indexer_filtering_registrations_pushdata_table(db)
+    create_outbound_data_table(db)
+    create_outbound_data_logs_table(db)
 
 def delete_all_tables(db: sqlite3.Connection) -> None:
+    db.execute("DROP TABLE IF EXISTS outbound_data_logs")
+    db.execute("DROP TABLE IF EXISTS outbound_data")
     db.execute("DROP TABLE IF EXISTS indexer_filtering_registrations_pushdata")
     db.execute("DROP TABLE IF EXISTS account_payment_channels")
     db.execute("DROP TABLE IF EXISTS accounts")
@@ -541,3 +549,117 @@ def set_payment_channel_closed(channel_id: int, channel_state: ChannelState,
     cursor = db.execute(sql, (channel_id,))
     if cursor.rowcount != 1:
         raise DatabaseStateModifiedError
+
+
+# SECTION: Outbound data.
+
+def create_outbound_data_table(db: sqlite3.Connection) -> None:
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS outbound_data (
+        outbound_data_id        INTEGER     PRIMARY KEY,
+        account_id              INTEGER     NOT NULL,
+        outbound_data           BLOB        NOT NULL,
+        outbound_data_hash      BLOB        NOT NULL,
+        outbound_data_flags     INTEGER     NOT NULL,
+        content_type            TEXT        NOT NULL,
+        date_created            INTEGER     NOT NULL,
+        FOREIGN KEY(account_id) REFERENCES accounts (account_id)
+    )
+    """)
+
+
+def create_outbound_data_logs_table(db: sqlite3.Connection) -> None:
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS outbound_data_logs (
+        account_id              INTEGER     NOT NULL,
+        outbound_data_id        INTEGER     DEFAULT NULL,
+        outbound_data_flags     INTEGER     NOT NULL,
+        response_status_code    INTEGER     DEFAULT NULL,
+        response_reason         TEXT        DEFAULT NULL,
+        date_created            INTEGER     NOT NULL,
+        FOREIGN KEY(account_id) REFERENCES accounts (account_id),
+        FOREIGN KEY(outbound_data_id) REFERENCES outbound_data (outbound_data_id)
+    )
+    """)
+
+
+def create_outbound_datas_write(data_creation_rows: list[OutboundDataRow],
+        log_creation_rows_by_key: dict[tuple[int, bytes], OutboundDataLogRow],
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None
+    sql_prefix = "INSERT INTO outbound_data (outbound_data_id, account_id, outbound_data, " \
+        "outbound_data_hash, outbound_data_flags, content_type, date_created) VALUES"
+    sql_suffix = "RETURNING outbound_data_id, account_id, outbound_data_hash"
+    # Remember that SQLite does not guarantee that the returned row order matches the insert order
+    # so we need something to match the id to the inserted row, and the hash aids in this.
+    datas_created = bulk_insert_returning(OutboundDataCreatedRow, db, sql_prefix, sql_suffix,
+        data_creation_rows)
+    if len(datas_created) != len(data_creation_rows):
+        raise DatabaseStateModifiedError()
+
+    # Insert all the created ids into the log rows.
+    for data_created in datas_created:
+        log_row_key = (data_created.account_id, data_created.outbound_data_hash)
+        log_creation_rows_by_key[log_row_key] = log_creation_rows_by_key[log_row_key] \
+            ._replace(outbound_data_id=data_created.outbound_data_id)
+
+    log_creation_rows = list(log_creation_rows_by_key.values())
+    # Verify that every log row got a created id for the outbound data row.
+    assert all(log_row.outbound_data_id is not None for log_row in log_creation_rows)
+
+    sql = "INSERT INTO outbound_data_logs (account_id, outbound_data_id, outbound_data_flags, " \
+        "response_status_code, response_reason, date_created) VALUES (?, ?, ?, ?, ?, ?)"
+    cursor = db.executemany(sql, log_creation_rows)
+    if cursor.rowcount != len(log_creation_rows):
+        raise DatabaseStateModifiedError()
+
+
+
+def create_outbound_data_logs_write(creation_rows: list[OutboundDataLogRow],
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None
+    sql = "INSERT INTO outbound_data_logs (account_id, outbound_data_id, outbound_data_flags, " \
+        "response_status_code, response_reason, date_created) VALUES (?, ?, ?, ?, ?, ?)"
+    cursor = db.executemany(sql, creation_rows)
+    if cursor.rowcount != len(creation_rows):
+        raise DatabaseStateModifiedError()
+
+
+@replace_db_context_with_connection
+def read_pending_outbound_datas(db: sqlite3.Connection, flags: OutboundDataFlag,
+        mask: OutboundDataFlag) -> list[OutboundDataPendingRow]:
+    sql = """
+        WITH matches AS (
+            SELECT outbound_data_id, date_created, row_number() OVER (PARTITION BY outbound_data_id
+                ORDER BY date_created DESC) as rank
+            FROM outbound_data_logs
+            WHERE outbound_data_id IS NOT NULL
+        )
+        SELECT OD.outbound_data_id, OD.account_id, OD.outbound_data, OD.outbound_data_flags,
+            OD.content_type, OD.date_created, A.tip_filter_callback_url, A.tip_filter_callback_token
+        FROM outbound_data OD
+        INNER JOIN matches M ON M.outbound_data_id=OD.outbound_data_id AND M.rank=1
+        INNER JOIN accounts A ON A.account_id=OD.account_id
+        WHERE (OD.outbound_data_flags&?)=?
+        ORDER BY OD.date_created ASC
+    """
+    sql_values = (mask, flags)
+    return [ OutboundDataPendingRow(row[0], row[1], row[2], OutboundDataFlag(row[3]), row[4],
+        row[5], row[6], row[7]) for row in db.execute(sql, sql_values) ]
+
+
+def update_outbound_data_flags_write(entries: list[tuple[OutboundDataFlag, int]],
+        db: Optional[sqlite3.Connection]=None) -> None:
+    assert db is not None
+    sql = "UPDATE outbound_data SET outbound_data_flags=? WHERE outbound_data_id=?"
+    cursor = db.executemany(sql, entries)
+    assert cursor.rowcount == len(entries)
+
+
+@replace_db_context_with_connection
+def read_outbound_data_logs(db: sqlite3.Connection, outbound_data_ids: Sequence[int]) \
+        -> list[OutboundDataLogRow]:
+    sql = "SELECT account_id, outbound_data_id, outbound_data_flags, response_status_code, " \
+        "response_reason, date_created FROM outbound_Data_logs WHERE outbound_data_id IN ({}) " \
+        "ORDER BY date_created"
+    return read_rows_by_id(OutboundDataLogRow, db, sql, [], outbound_data_ids)
