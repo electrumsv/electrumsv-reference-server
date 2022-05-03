@@ -93,7 +93,7 @@ class MsgBoxSQLiteRepository:
     def create_message_status_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
-        sql = (f"""
+        sql = ("""
             CREATE TABLE IF NOT EXISTS message_status (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id    BIGINT             NOT NULL,
@@ -164,7 +164,7 @@ class MsgBoxSQLiteRepository:
         )
         def write(db: Optional[sqlite3.Connection]=None) -> MsgBox:
             assert db is not None and isinstance(db, sqlite3.Connection)
-            sql = f"""
+            sql = """
                 INSERT INTO msg_box (account_id, externalid, publicread, publicwrite, locked,
                     sequenced, minagedays, maxagedays, autoprune)
                 VALUES(@owner, @externalid, @publicread, @publicwrite, @locked,
@@ -208,7 +208,7 @@ class MsgBoxSQLiteRepository:
 
     def create_msg_box_api_token(self, db: sqlite3.Connection,
             msg_box_api_token_row: models.MsgBoxAPITokenRow) -> sqlite3.Cursor:
-        sql = f"""
+        sql = """
             INSERT INTO msg_box_api_token (account_id, msg_box_id, token, description, canread,
                 canwrite, validfrom)
             VALUES(@account_id, @msg_box_id, @token, @description, @canread, @canwrite, @validfrom)
@@ -302,7 +302,7 @@ class MsgBoxSQLiteRepository:
         return read(self._database_context)
 
     def get_msg_boxes(self, account_id: int) -> list[MsgBox]:
-        sql = f"""
+        sql = """
             SELECT id, account_id, externalid, publicread, publicwrite, locked, sequenced,
                    minagedays, maxagedays, autoprune,
                    (SELECT max(seq) FROM message WHERE msg_box.id = message.msg_box_id) AS seq

@@ -313,7 +313,7 @@ async def process_contract_update_async(refund_signature_bytes: bytes, refund_va
         channel_row.funding_output_script_bytes, sighash)
     if not client_public_key.verify_der_signature(der_signature_bytes, message_hash_bytes,
             hasher=None):
-        raise BrokenChannelError(f"Funding transaction signature invalid")
+        raise BrokenChannelError("Funding transaction signature invalid")
 
     return new_sequence
 

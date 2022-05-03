@@ -159,7 +159,7 @@ def create_account_table(db: sqlite3.Connection) -> None:
     """
     db.execute(sql)
 
-    sql = f"""
+    sql = """
     CREATE INDEX IF NOT EXISTS master_api_key_idx ON accounts (api_key);
     """
     db.execute(sql)
