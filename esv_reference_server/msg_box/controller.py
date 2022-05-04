@@ -25,7 +25,7 @@ from ..types import AccountMessage, ChannelNotification, MsgBoxWSClient, \
 from ..utils import _try_read_bearer_token
 
 from .models import Message, MsgBox, MsgBoxAPIToken
-from .repositories import MsgBoxSQLiteRepository
+from .repositories import MsgBoxSQLiteRepository, PeerChannelMessageWriteError
 from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
 
@@ -152,8 +152,8 @@ async def update_single_channel_properties(request: web.Request) -> web.Response
             raise web.HTTPNotFound()
         logger.info("Message box with external_id: %s was updated", external_id)
         return web.json_response(data=asdict(msg_box_view_amend))
-    except JSONDecodeError as e:
-        logger.exception(e)
+    except JSONDecodeError:
+        logger.exception("bad request body, invalid JSON")
         raise web.HTTPBadRequest(reason="bad request body, invalid JSON")
 
 
@@ -218,8 +218,8 @@ async def create_new_channel(request: web.Request) -> web.Response:
         logger.info("New message box for account_id %s was created external_id: %s",
             account_id, msg_box_view_get.id)
         return web.json_response(asdict(msg_box_view_get))
-    except JSONDecodeError as e:
-        logger.exception(e)
+    except JSONDecodeError:
+        logger.exception("bad request body, invalid JSON")
         raise web.HTTPBadRequest(reason="bad request body, invalid JSON")
 
 
@@ -389,20 +389,23 @@ async def write_message(request: web.Request) -> web.Response:
         payload=body,
         received_ts=datetime.utcnow()
     )
-    result, error_code = msg_box_repository.write_message(message)
-    if error_code:
-        if error_code == APIErrors.CHANNEL_LOCKED:
+    try:
+        result = msg_box_repository.write_message(message)
+    except PeerChannelMessageWriteError as exc:
+        if exc.code == APIErrors.CHANNEL_LOCKED:
             raise web.HTTPBadRequest(reason=f"{APIErrors.CHANNEL_LOCKED}: "
                                             "Channel is locked. Write failed.")
-        elif error_code == APIErrors.SEQUENCING_FAILURE:
+        elif exc.code == APIErrors.SEQUENCING_FAILURE:
             raise web.HTTPBadRequest(reason=f"{APIErrors.SEQUENCING_FAILURE}: "
                                             "Sequencing failure. This channel still "
                                             "has unread messages. Write failed.")
-        elif error_code == APIErrors.DATABASE_WRITE_FAILURE:
+        elif exc.code == APIErrors.DATABASE_WRITE_FAILURE:
             return web.Response(reason=f"{APIErrors.DATABASE_WRITE_FAILURE}: "
-                                       "Database insertion failed unexpectedly - "
-                                       "Try again later.",
+                                       "Database insertion failed unexpectedly - Try again later.",
                                 status=HTTPStatus.INTERNAL_SERVER_ERROR)
+        else:
+            raise web.HTTPInternalServerError()
+
     assert result is not None
     message_id, msg_box_get_view = result
     logger.info("Message %s from api_token_id: %s written to channel %s", message_id,
@@ -437,7 +440,7 @@ async def get_messages(request: web.Request) -> web.Response:
     external_id = request.match_info.get('channelid')
     if external_id is None:
         raise web.HTTPNotFound(reason=f"{APIErrors.MISSING_PATH_PARAMETER}: "
-                                      f"Channel ID not provided.")
+                                      "Channel ID not provided.")
 
     onlyunread = False
     if request.query.get('unread', "false") == "true":
@@ -522,8 +525,8 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
 
     try:
         body = await request.json()
-    except JSONDecodeError as e:
-        logger.exception(e)
+    except JSONDecodeError:
+        logger.exception("bad request body, invalid JSON")
         raise web.HTTPBadRequest(reason="bad request body, invalid JSON")
 
     set_read_to = cast(bool, body['read'])
@@ -623,7 +626,7 @@ class MsgBoxWebSocket(web.View):
         try:
             internal_message_box_id, channel_token = _auth_for_channel_token(self.request,
                 'MsgBoxWebSocket', channel_api_key, external_message_box_id, msg_box_repository)
-        except web.HTTPException as e:
+        except web.HTTPException:
             raise web.HTTPUnauthorized(reason=f"{APIErrors.INVALID_BEARER_TOKEN}: "
                                               f"Unauthorized - invalid Bearer Token")
 
@@ -640,8 +643,8 @@ class MsgBoxWebSocket(web.View):
         try:
             await self._handle_new_connection(client)
             return ws
-        except Exception as e:
-            return web.Response(reason=f"Internal server error", status=500)
+        except Exception:
+            return web.Response(reason="Internal server error", status=500)
         finally:
             if not ws.closed:
                 await ws.close()

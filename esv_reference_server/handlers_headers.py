@@ -27,7 +27,7 @@ async def get_header(request: web.Request) -> web.Response:
     blockhash = request.match_info.get('hash')
     if not blockhash:
         raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_PATH_PARAMETER}: "
-                                        f"'hash' path parameter not supplied")
+                                        "'hash' path parameter not supplied")
 
     try:
         url_to_fetch = f"{app_state.header_sv_url}/api/v1/chain/header/{blockhash}"

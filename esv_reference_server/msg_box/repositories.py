@@ -28,6 +28,12 @@ from .view_models import APITokenViewModelGet, MessageViewModelGetJSON, \
 # TODO - add indexes on relevant columns (beyond primary keys and foreign keys)
 
 
+class PeerChannelMessageWriteError(Exception):
+
+    def __init__(self, code: APIErrors):
+        self.code = code
+
+
 class MsgBoxSQLiteRepository:
 
     def __init__(self, database_context: DatabaseContext) -> None:
@@ -475,11 +481,10 @@ class MsgBoxSQLiteRepository:
             return cast(int, rows[0][0])
         return read(self._database_context)
 
-    def write_message(self, message: Message) \
-            -> tuple[Optional[tuple[int, MessageViewModelGet]], Optional[APIErrors]]:
+    def write_message(self, message: Message) -> tuple[int, MessageViewModelGet]:
         """Returns an error code and error reason"""
         def write(db: Optional[sqlite3.Connection]=None) \
-                -> tuple[Optional[tuple[int, MessageViewModelGet]], Optional[APIErrors]]:
+                -> tuple[int, MessageViewModelGet]:
             assert db is not None and isinstance(db, sqlite3.Connection)
             # Translating this query from postgres -> SQLite
             # The "FOR UPDATE" lock can be dropped because SQLite does broad-brush/global db locking
@@ -495,12 +500,12 @@ class MsgBoxSQLiteRepository:
             if len(rows) != 0:
                 locked, sequenced = rows[0]
                 if locked:
-                    return None, APIErrors.CHANNEL_LOCKED
+                    raise PeerChannelMessageWriteError(code=APIErrors.CHANNEL_LOCKED)
 
                 if sequenced:
                     unreadCount = self.get_unread_messages_count(db, message.msg_box_api_token_id)
                     if unreadCount > 0:
-                        return None, APIErrors.SEQUENCING_FAILURE
+                        raise PeerChannelMessageWriteError(code=APIErrors.SEQUENCING_FAILURE)
 
             sql = """
                 INSERT INTO message (fromtoken, msg_box_id, seq, receivedts, contenttype, payload)
@@ -526,7 +531,7 @@ class MsgBoxSQLiteRepository:
                 self.logger.debug("Wrote message sequence: %s for msg_box_id: %s",
                     seq, msg_box_id)
             else:
-                return None, APIErrors.DATABASE_WRITE_FAILURE
+                raise PeerChannelMessageWriteError(code=APIErrors.DATABASE_WRITE_FAILURE)
 
             sql = """
                 INSERT INTO message_status
@@ -543,8 +548,7 @@ class MsgBoxSQLiteRepository:
             """
             params3 = (message_id, fromtoken, msg_box_id)
             db.execute(sql, params3)
-            result = (message_id, message_view_model_get)
-            return result, None
+            return message_id, message_view_model_get
         return self._database_context.run_in_thread(write)
 
     def get_unread_messages_count(self, db: sqlite3.Connection, msg_box_api_token_id: int) -> int:

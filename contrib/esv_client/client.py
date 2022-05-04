@@ -100,7 +100,7 @@ async def main() -> None:
         except (ConnectionRefusedError, ClientConnectorError):
             # print(f"Unable to connect to: {WS_URL_HEADERS} - retrying...")
             print(f"Unable to connect to: {url} - retrying...")
-        except Exception as e:
+        except Exception:
             exc_type, exc_value, exc_tb = sys.exc_info()
             tb = traceback.TracebackException(exc_type, exc_value, exc_tb)
             print(''.join(tb.format_exception_only()))
