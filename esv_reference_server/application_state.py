@@ -327,8 +327,8 @@ class ApplicationState(object):
                     current_best_hash = ""
                     await asyncio.sleep(1)
                     continue
-                except Exception as e:
-                    logger.exception(e)
+                except Exception:
+                    logger.exception("Unexpected exception in header notification task")
                     await asyncio.sleep(1)
                     continue
 
@@ -363,7 +363,7 @@ class ApplicationState(object):
                     except ConnectionResetError:
                         self.logger.error("Websocket disconnected")
         except Exception:
-            self.logger.exception("unexpected exception in header_notifications_thread")
+            self.logger.exception("Unexpected exception in header_notifications_thread")
         finally:
             self.logger.info("Closing header push notifications thread")
 
@@ -405,8 +405,8 @@ class ApplicationState(object):
             while not self._exit_event.is_set():
                 try:
                     msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
-                except Exception as e:
-                    logger.exception(e)
+                except Exception:
+                    logger.exception("Unexpected exception in peer channel notification task")
                     continue
 
                 msg_box = notification['msg_box']

@@ -19,6 +19,7 @@ from bitcoinx import hash_to_hex_str, hex_str_to_hash
 
 from .constants import IndexerPushdataRegistrationFlag
 from . import sqlite_db
+from .errors import APIErrors
 from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
     DatabaseStateModifiedError, delete_indexer_filtering_registrations_pushdatas, \
     get_account_id_for_api_key, read_indexer_filtering_registrations_pushdatas, \
@@ -26,7 +27,7 @@ from .sqlite_db import create_indexer_filtering_registrations_pushdatas, \
 from .types import Outpoint, outpoint_struct, tip_filter_list_struct, \
     tip_filter_registration_struct, TipFilterRegistrationEntry
 from .util.network import TokenValidationError, UrlValidationError, \
-    validate_authorization_header, validate_url
+    validate_authorization_header, validate_url, len_stripped_text
 
 if TYPE_CHECKING:
     from .application_state import ApplicationState
@@ -38,7 +39,8 @@ logger = logging.getLogger("handlers-indexer")
 def _check_indexer_connected(app_state: ApplicationState) -> None:
     # We use the open web socket to the indexer as an indication that it is active/accessible.
     if not app_state.indexer_is_connected:
-        raise web.HTTPServiceUnavailable(reason="This functionality is temporarily unavailable")
+        raise web.HTTPServiceUnavailable(reason=f"{APIErrors.INDEXER_UNAVAILABLE}: "
+                                                "This functionality is temporarily unavailable")
 
 
 async def mirrored_indexer_call_async(request: web.Request, *,
@@ -143,7 +145,7 @@ async def indexer_post_indexer_settings(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason="Invalid 'Accept', expected 'application/json', "
             f"got '{accept_type}'")
 
-    settings_update_object =  await request.json()
+    settings_update_object = await request.json()
     if not isinstance(settings_update_object, dict):
         raise web.HTTPBadRequest(reason="Invalid settings update object in body")
 
@@ -155,26 +157,35 @@ async def indexer_post_indexer_settings(request: web.Request) -> web.Response:
 
     if new_tip_filter_callback_url is not None:
         if not isinstance(new_tip_filter_callback_url, str):
-            raise web.HTTPBadRequest(reason="Invalid tip filter callback url")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_TIP_FILTER_CALLBACK}: "
+                                            "Invalid tip filter callback url")
         new_tip_filter_callback_url = new_tip_filter_callback_url.strip()
 
         # This enforces URL correctness, including limiting the schemes to http/https.
         try:
             validate_url(new_tip_filter_callback_url, allow_path=True, allow_query=True)
         except UrlValidationError as e:
-            raise web.HTTPBadRequest(reason=f"Invalid tip filter callback url {e.args[0]}")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_TIP_FILTER_CALLBACK}: "
+                                            f"Invalid tip filter callback url {e.args[0]}")
 
         if new_tip_filter_callback_token is not None:
             try:
                 validate_authorization_header(new_tip_filter_callback_token)
             except TokenValidationError as e:
-                raise web.HTTPBadRequest(reason=f"Invalid tip filter callback url {e.args[0]}")
+                if e.code == APIErrors.TOKEN_VALIDATION_ERROR_TOO_SHORT:
+                    len_stripped_token = len_stripped_text(new_tip_filter_callback_token)
+                    raise web.HTTPBadRequest(reason=f"{e.code}: Invalid tip filter callback token. "
+                        f"Got {len_stripped_token} non-whitespace characters, expected 8+")
+                elif e.code == APIErrors.TOKEN_VALIDATION_ERROR_INVALID:
+                    raise web.HTTPBadRequest(reason=f"{APIErrors.TOKEN_VALIDATION_ERROR_INVALID}: "
+                        "Invalid tip filter callback token. Failed header value validation")
 
         # If the string strip operation made a difference, keep that difference in the update.
         settings_update_object["tipFilterCallbackUrl"] = new_tip_filter_callback_url
     else:
         if new_tip_filter_callback_token is not None:
-            raise web.HTTPBadRequest(reason="Tip filter callback token provided without url")
+            raise web.HTTPBadRequest(reason=f"{APIErrors.INVALID_TIP_FILTER_CALLBACK}: "
+                                            "Tip filter callback token provided without url")
 
     settings_object = await app_state.database_context.run_in_thread_async(
         sqlite_db.update_account_indexer_settings_write, account_id, settings_update_object)
@@ -300,7 +311,8 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
     date_created = await app_state.database_context.run_in_thread_async(
         create_indexer_filtering_registrations_pushdatas, account_id, registration_entries)
     if date_created is None:
-        raise web.HTTPBadRequest(reason="some pushdata hashes already registered")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.PUSHDATA_HASHES_ALREADY_REGISTERED}: "
+                                        "some pushdata hashes already registered")
 
     # Pass on the registrations to the indexer. The indexer just supports binary as it is
     # not exposed publically, so we reserialise the hashes if necessary.
@@ -403,7 +415,8 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
             filter_mask=IndexerPushdataRegistrationFlag.MASK_FINALISED_DELETING_CLEAR,
             require_all=True)
     except DatabaseStateModifiedError:
-        raise web.HTTPBadRequest(reason="some pushdata hashes are not registered")
+        raise web.HTTPBadRequest(reason=f"{APIErrors.PUSHDATA_HASHES_NOT_REGISTERED}: "
+                                        f"some pushdata hashes are not registered")
 
     # Pass on the registrations to the indexer. The indexer just supports binary as it is
     # not exposed publically, so we reserialise the hashes.

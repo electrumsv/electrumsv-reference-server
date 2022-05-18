@@ -7,22 +7,29 @@ import re
 from typing import Optional, Set
 import urllib.parse
 
+from esv_reference_server.errors import APIErrors
+
 
 class TokenValidationError(Exception):
-    ...
+
+    def __init__(self, code: APIErrors):
+        self.code = code
 
 
 AUTHORIZATION_HEADER_VALUE_REGEX = re.compile("^[ -~]+$", re.ASCII)
 
 
-def validate_authorization_header(text: str) -> None:
+def len_stripped_text(text: str) -> int:
     stripped_text = text.replace(" ", "")
-    if len(stripped_text) < 8:
-        raise TokenValidationError(f"Got {len(stripped_text)} non-whitespace characters, "
-            f"expected {8}+")
+    return len(stripped_text)
+
+
+def validate_authorization_header(text: str) -> None:
+    if len_stripped_text(text) < 8:
+        raise TokenValidationError(APIErrors.TOKEN_VALIDATION_ERROR_TOO_SHORT)
     match = AUTHORIZATION_HEADER_VALUE_REGEX.match(text)
     if match is None:
-        raise TokenValidationError("Failed header value validation")
+        raise TokenValidationError(APIErrors.TOKEN_VALIDATION_ERROR_INVALID)
 
 
 
