@@ -4,6 +4,8 @@ Distributed under the Open BSV software license, see the accompanying file LICEN
 """
 
 from __future__ import annotations
+
+import base64
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from http import HTTPStatus
@@ -380,6 +382,9 @@ async def write_message(request: web.Request) -> web.Response:
                                             actual_size=content_length)
 
     body = await request.read()
+
+    if request.content_type == "application/json":
+        body = base64.b64encode(body)
 
     # Write message to database
     message = Message(
