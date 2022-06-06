@@ -2,6 +2,7 @@
 Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
+import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -135,16 +136,13 @@ class APITokenViewModelGet:
     can_write: bool
 
 
-GenericJSON = Dict[Any, Any]
-
-
 # These are both for json but they represent an
 # underlying json vs binary message
 class MessageViewModelGetJSON(TypedDict):
     sequence: int
     received: str
     content_type: str
-    payload: GenericJSON
+    payload: str
 
 
 class MessageViewModelGetBinary(TypedDict):
@@ -167,7 +165,7 @@ class MessageViewModelGet:
                 sequence=self.sequence,
                 received=self.received.isoformat(),
                 content_type=self.content_type,
-                payload=json.loads(self.payload)
+                payload=str(self.payload)
             )
         else:
             return MessageViewModelGetBinary(
