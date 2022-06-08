@@ -1059,9 +1059,9 @@ components:
       type: object
       properties:
         public_read:
-          type: string
+          type: boolean
         public_write:
-          type: string
+          type: boolean
         sequenced:
           type: boolean
         retention:
@@ -1070,9 +1070,9 @@ components:
       type: object
       properties:
         public_read:
-          type: string
+          type: boolean
         public_write:
-          type: string
+          type: boolean
         locked:
           type: boolean
     Channel:

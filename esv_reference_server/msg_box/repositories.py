@@ -25,9 +25,6 @@ from .view_models import APITokenViewModelGet, MessageViewModelGetJSON, \
     MessageViewModelGetBinary, MsgBoxViewModelAmend, MessageViewModelGet
 
 
-# TODO - add indexes on relevant columns (beyond primary keys and foreign keys)
-
-
 class PeerChannelMessageWriteError(Exception):
 
     def __init__(self, code: APIErrors):
@@ -79,7 +76,7 @@ class MsgBoxSQLiteRepository:
     def create_messages_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
-        # TODO(1.4.0) Sqlite. There is no TIMESTAMP type. What is this?
+
         sql = ("""
             CREATE TABLE IF NOT EXISTS message (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,7 +114,7 @@ class MsgBoxSQLiteRepository:
     def create_message_box_api_tokens_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
-        # TODO(1.4.0) Sqlite. There is no TIMESTAMP type. What is this?
+
         sql = ("""CREATE TABLE IF NOT EXISTS msg_box_api_token (
               id                    INTEGER PRIMARY KEY AUTOINCREMENT,
               account_id            BIGINT             NOT NULL,
