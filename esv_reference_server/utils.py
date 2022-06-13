@@ -68,7 +68,3 @@ def from_isoformat(iso_timestamp: str) -> datetime:
         return datetime.fromisoformat(iso_timestamp.replace('Z', UTC_TIMEZONE_INFO))
     else:
         raise NoTimezoneInfoException()
-
-
-def utcnow_with_tzinfo() -> datetime:
-    return datetime.fromisoformat(datetime.utcnow().isoformat() + UTC_TIMEZONE_INFO)

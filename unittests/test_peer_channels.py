@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 import base64
-import datetime
+from datetime import datetime
 from http import HTTPStatus
 import json
 import logging
@@ -487,8 +487,7 @@ class TestAiohttpRESTAPI:
 
         response_body = result.json()
         assert isinstance(response_body['sequence'], int)
-        assert isinstance(from_isoformat(response_body['received']),
-            datetime.datetime)
+        assert isinstance(from_isoformat(response_body['received']), datetime)
         assert response_body['content_type'] == 'application/json'
         assert response_body['payload'] == expected_response_body
 
@@ -538,8 +537,7 @@ class TestAiohttpRESTAPI:
         response_body = result.json()
         assert isinstance(response_body, list)
         assert response_body[0]['sequence'] == 1
-        assert isinstance(from_isoformat(response_body[0]['received']),
-            datetime.datetime)
+        assert isinstance(from_isoformat(response_body[0]['received']), datetime)
         assert response_body[0]['content_type'] == 'application/json'
         assert response_body[0]['payload'] == expected_response_body
 

@@ -3,10 +3,10 @@ Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
 from __future__ import annotations
+
+import time
 from dataclasses import asdict
 import logging
-
-from ..utils import utcnow_with_tzinfo, from_isoformat
 
 try:
     # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
@@ -16,7 +16,7 @@ except ModuleNotFoundError:
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
 from typing import Any, cast, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 
 from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
 
@@ -87,7 +87,7 @@ class MsgBoxSQLiteRepository:
                 msg_box_id    BIGINT             NOT NULL,
 
                 seq           BIGINT             NOT NULL,
-                receivedts    TEXT               NOT NULL,
+                receivedts    INTEGER            NOT NULL,
                 contenttype   VARCHAR(64)        NOT NULL,
                 payload       BLOB,
 
@@ -127,8 +127,8 @@ class MsgBoxSQLiteRepository:
               description           VARCHAR(1024),
               canread               INTEGER,
               canwrite              INTEGER,
-              validfrom             TEXT               NOT NULL,
-              validto               TEXT,
+              validfrom             INTEGER            NOT NULL,
+              validto               INTEGER,
 
               UNIQUE (token),
               FOREIGN KEY (account_id) REFERENCES accounts (account_id),
@@ -190,7 +190,7 @@ class MsgBoxSQLiteRepository:
                 description="Owner",
                 canread=True,
                 canwrite=True,
-                validfrom=utcnow_with_tzinfo(),
+                validfrom=time.time(),
                 validto=None)
             cursor = self.create_msg_box_api_token(db, msg_box_api_token_row)
             id, account_id, msg_box_id, token, description, \
@@ -379,7 +379,7 @@ class MsgBoxSQLiteRepository:
             api_token_view_model_create.description,
             api_token_view_model_create.can_read,
             api_token_view_model_create.can_write,
-            utcnow_with_tzinfo()
+            time.time()
         )
         def write(db: Optional[sqlite3.Connection]=None) \
                 -> Optional[tuple[int, str, str, int, int]]:
@@ -396,7 +396,7 @@ class MsgBoxSQLiteRepository:
     def get_api_token_by_id(self, token_id: int) -> Optional[APITokenViewModelGet]:
         sql = "SELECT id, token, description, canread, canwrite FROM msg_box_api_token " \
               "WHERE id = @token_id and (validto IS NULL OR validto >= @validto);"
-        params = (token_id, utcnow_with_tzinfo())
+        params = (token_id, time.time())
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[APITokenViewModelGet]:
             rows = db.execute(sql, params).fetchall()
@@ -414,15 +414,18 @@ class MsgBoxSQLiteRepository:
             FROM msg_box_api_token
             WHERE token = @token and (validto IS NULL OR validto >= @validto)
         """
-        params = (token, utcnow_with_tzinfo())
+        params = (token, time.time())
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[MsgBoxAPIToken]:
             row = db.execute(sql, params).fetchone()
             if row is not None:
                 id, account_id, msg_box_id, token, description, canread, canwrite, validfrom, \
                     validto = row
-                return MsgBoxAPIToken(id, account_id, msg_box_id,
-                    token, description, bool(canread), bool(canwrite), validfrom, validto)
+                validfrom_dt = datetime.fromtimestamp(validfrom, tz=timezone.utc)
+                validto_dt = datetime.fromtimestamp(validto, tz=timezone.utc) \
+                    if validto is not None else None
+                return MsgBoxAPIToken(id, account_id, msg_box_id, token, description, bool(canread),
+                                      bool(canwrite), validfrom_dt, validto_dt)
             return None
         return read(self._database_context)
 
@@ -437,7 +440,7 @@ class MsgBoxSQLiteRepository:
           AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto)
           AND (@token IS NULL or msg_box_api_token.token = @token);
         """
-        params = (external_id, utcnow_with_tzinfo(), token)
+        params = (external_id, time.time(), token)
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[list[dict[str, Any]]]:
             rows = db.execute(sql, params).fetchall()
@@ -455,7 +458,7 @@ class MsgBoxSQLiteRepository:
 
     def delete_api_token(self, token_id: int) -> None:
         sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
-        params = (utcnow_with_tzinfo(), token_id)
+        params = (time.time(), token_id)
         def write(db: Optional[sqlite3.Connection]=None) -> None:
             assert db is not None and isinstance(db, sqlite3.Connection)
             db.execute(sql, params)
@@ -526,7 +529,7 @@ class MsgBoxSQLiteRepository:
             if len(rows) != 0:
                 message_id, fromtoken, msg_box_id, seq, receivedts, contenttype, payload = rows[0]
                 message_view_model_get = view_models.MessageViewModelGet(sequence=seq,
-                    received=from_isoformat(receivedts),
+                    received=datetime.fromtimestamp(receivedts, tz=timezone.utc),
                     content_type=contenttype, payload=payload)
                 self.logger.debug("Wrote message sequence: %s for msg_box_id: %s",
                     seq, msg_box_id)
@@ -586,7 +589,7 @@ class MsgBoxSQLiteRepository:
                     WHERE message_status.message_id = message.id AND NOT message_status.isdeleted
                 );
         """
-        params = (external_id, api_key, utcnow_with_tzinfo())
+        params = (external_id, api_key, time.time())
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> int:
             rows = db.execute(sql, params).fetchall()
@@ -637,7 +640,7 @@ class MsgBoxSQLiteRepository:
             """
 
             sequence: int
-            receivedts: str
+            receivedts: float
             content_type: str
             payload: bytes
             messages = []
@@ -646,7 +649,7 @@ class MsgBoxSQLiteRepository:
 
                 message = view_models.MessageViewModelGet(
                     sequence=sequence,
-                    received=from_isoformat(receivedts),
+                    received=datetime.fromtimestamp(receivedts, tz=timezone.utc),
                     content_type=content_type,
                     payload=payload,
                 )
@@ -713,7 +716,7 @@ class MsgBoxSQLiteRepository:
                     msg_box_id=msg_box_id,
                     msg_box_api_token_id=fromtoken,
                     content_type=contenttype,
-                    received_ts=from_isoformat(receivedts)
+                    received_ts=datetime.fromtimestamp(receivedts, tz=timezone.utc)
                 )
             return None
         return read(self._database_context)
