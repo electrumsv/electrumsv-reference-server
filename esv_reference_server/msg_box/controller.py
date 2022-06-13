@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from http import HTTPStatus
 from json import JSONDecodeError
 import logging
@@ -24,7 +24,7 @@ from ..errors import APIErrors
 from .. import sqlite_db
 from ..types import AccountMessage, ChannelNotification, MsgBoxWSClient, \
     PushNotification
-from ..utils import _try_read_bearer_token
+from ..utils import _try_read_bearer_token, utcnow_with_tzinfo
 
 from .models import Message, MsgBox, MsgBoxAPIToken
 from .repositories import MsgBoxSQLiteRepository, PeerChannelMessageWriteError
@@ -45,7 +45,7 @@ def _auth_for_channel_token(request: web.Request,
     if token_row is None:
         raise web.HTTPUnauthorized()
 
-    if token_row.valid_to and datetime.utcnow() > token_row.valid_to:
+    if token_row.valid_to and utcnow_with_tzinfo() > token_row.valid_to:
         raise web.HTTPUnauthorized(reason=f"{APIErrors.PEER_CHANNEL_TOKEN_EXPIRED}: "
                                           "Peer channel token expired.")
 
@@ -392,7 +392,7 @@ async def write_message(request: web.Request) -> web.Response:
         msg_box_api_token_id=api_token_row.id,
         content_type=request.content_type,
         payload=body,
-        received_ts=datetime.utcnow()
+        received_ts=utcnow_with_tzinfo()
     )
     try:
         result = msg_box_repository.write_message(message)
@@ -596,7 +596,7 @@ async def delete_message(request: web.Request) -> web.Response:
                                       f"Peer channel '{external_id}' not found.")
 
     min_timestamp = message_metadata.received_ts + timedelta(days=msg_box.min_age_days)
-    if datetime.utcnow() < min_timestamp:
+    if utcnow_with_tzinfo() < min_timestamp:
         raise web.HTTPBadRequest(reason=f"{APIErrors.RETENTION_NOT_YET_EXPIRED}: "
                                         "Retention period has not yet expired.")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64
+from datetime import datetime
 import json
 import os
 import struct
@@ -50,3 +51,24 @@ def pack_account_message_bytes(message_kind: AccountMessageKind, message_data: A
     else:
         raise NotImplementedError(f"Packing message kind {message_kind} is unsupported")
     return message_bytes
+
+
+UTC_TIMEZONE_INFO = '+00:00'
+ZULU_TIMEZONE_SUFFIX = 'Z'
+
+
+class NoTimezoneInfoException(Exception):
+    pass
+
+
+def from_isoformat(iso_timestamp: str) -> datetime:
+    if iso_timestamp.endswith(UTC_TIMEZONE_INFO):
+        return datetime.fromisoformat(iso_timestamp)
+    elif iso_timestamp.endswith(ZULU_TIMEZONE_SUFFIX):
+        return datetime.fromisoformat(iso_timestamp.replace('Z', UTC_TIMEZONE_INFO))
+    else:
+        raise NoTimezoneInfoException()
+
+
+def utcnow_with_tzinfo() -> datetime:
+    return datetime.fromisoformat(datetime.utcnow().isoformat() + UTC_TIMEZONE_INFO)
