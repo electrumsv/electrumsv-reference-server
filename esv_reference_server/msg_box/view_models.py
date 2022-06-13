@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TypedDict, Dict, Union, cast, List
 
 from esv_reference_server.msg_box.models import MsgBox
+from esv_reference_server.utils import UTC_TIMEZONE_INFO, ZULU_TIMEZONE_SUFFIX
 
 
 class RetentionViewModelJSON(TypedDict):
@@ -161,14 +162,14 @@ class MessageViewModelGet:
         if self.content_type == 'application/json':
             return MessageViewModelGetJSON(
                 sequence=self.sequence,
-                received=self.received.isoformat(),
+                received=self.received.isoformat().replace(UTC_TIMEZONE_INFO, ZULU_TIMEZONE_SUFFIX),
                 content_type=self.content_type,
                 payload=self.payload.decode('utf-8')
             )
         else:
             return MessageViewModelGetBinary(
                 sequence=self.sequence,
-                received=self.received.isoformat(),
+                received=self.received.isoformat().replace(UTC_TIMEZONE_INFO, ZULU_TIMEZONE_SUFFIX),
                 content_type=self.content_type,
                 payload=self.payload.hex()
             )

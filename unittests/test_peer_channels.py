@@ -7,6 +7,9 @@ import json
 import logging
 import os
 from pathlib import Path
+
+from esv_reference_server.utils import from_isoformat
+
 try:
     # Linux expects the latest package version of 3.35.4 (as of pysqlite-binary 0.4.6)
     import pysqlite3 as sqlite3
@@ -484,7 +487,7 @@ class TestAiohttpRESTAPI:
 
         response_body = result.json()
         assert isinstance(response_body['sequence'], int)
-        assert isinstance(datetime.datetime.fromisoformat(response_body['received']),
+        assert isinstance(from_isoformat(response_body['received']),
             datetime.datetime)
         assert response_body['content_type'] == 'application/json'
         assert response_body['payload'] == expected_response_body
@@ -535,7 +538,7 @@ class TestAiohttpRESTAPI:
         response_body = result.json()
         assert isinstance(response_body, list)
         assert response_body[0]['sequence'] == 1
-        assert isinstance(datetime.datetime.fromisoformat(response_body[0]['received']),
+        assert isinstance(from_isoformat(response_body[0]['received']),
             datetime.datetime)
         assert response_body[0]['content_type'] == 'application/json'
         assert response_body[0]['payload'] == expected_response_body
