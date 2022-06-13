@@ -556,8 +556,7 @@ class MsgBoxSQLiteRepository:
               AND message_status.isread = FALSE
               AND message_status.isdeleted = FALSE
         """
-        params = (msg_box_api_token_id, )
-        rows = db.execute(sql, params).fetchall()
+        rows = db.execute(sql, (msg_box_api_token_id, )).fetchall()
         count = 0
         if len(rows) != 0:
             count = rows[0][0]
@@ -595,12 +594,10 @@ class MsgBoxSQLiteRepository:
         return read(self._database_context)
 
     def get_messages(self, api_token_id: int, onlyunread: bool) \
-            -> Optional[tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
-                              Union[int, str]]]:
+            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]], str]:
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) \
-                -> Optional[tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]],
-                    Union[int, str]]]:
+                -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]], str]:
             sql = """
                 SELECT msg_box.sequenced
                 FROM msg_box
@@ -608,13 +605,11 @@ class MsgBoxSQLiteRepository:
                 WHERE msg_box_api_token.id = @tokenid
                 -- FOR UPDATE  # not needed for SQLite
             """
-            params = (api_token_id, )
-            rows = db.execute(sql, params).fetchall()
-            if len(rows) != 0:
-                sequenced = rows[0][0]
-            else:
-                return None
+            rows = db.execute(sql, (api_token_id,)).fetchall()
+            if len(rows) == 0:
+                return [], ""
 
+            sequenced = rows[0][0]
             if sequenced:
                 sql = """
                     SELECT MAX(message.seq) AS max_sequence
@@ -622,16 +617,10 @@ class MsgBoxSQLiteRepository:
                     INNER JOIN message_status ON message_status.message_id = message.id
                     WHERE message_status.token_id = @tokenid AND NOT message_status.isdeleted;
                 """
-                params2 = (api_token_id,)
-                rows = db.execute(sql, params2).fetchall()
-                if len(rows) != 0:
-                    max_seq = rows[0][0]
-                    if max_seq is None:
-                        max_seq = 0
-                else:
-                    max_seq = ""
+                sequence_row = db.execute(sql, (api_token_id,)).fetchone()
+                max_sequence = str(sequence_row[0]) if sequence_row is not None else "0"
             else:
-                return None
+                max_sequence = ""
 
             sql = """
                 SELECT message.*
@@ -643,26 +632,23 @@ class MsgBoxSQLiteRepository:
                     AND (message_status.isread = false OR @onlyunread = false)
                 ORDER BY message.seq;
             """
-            params3 = (api_token_id, onlyunread)
-            rows = db.execute(sql, params3).fetchall()
 
+            sequence: int
+            receivedts: str
+            content_type: str
+            payload: bytes
             messages = []
-            if len(rows) != 0:
-                sequence: int
-                receivedts: str
-                content_type: str
-                payload: bytes
-                for row in rows:
-                    id, fromtoken, msg_box_id, sequence, receivedts, content_type, payload = row
+            for row in db.execute(sql, (api_token_id, onlyunread)).fetchall():
+                id, fromtoken, msg_box_id, sequence, receivedts, content_type, payload = row
 
-                    message = view_models.MessageViewModelGet(
-                        sequence=sequence,
-                        received=datetime.fromisoformat(receivedts),
-                        content_type=content_type,
-                        payload=payload,
-                    )
-                    messages.append(message.to_dict())
-            return messages, max_seq
+                message = view_models.MessageViewModelGet(
+                    sequence=sequence,
+                    received=datetime.fromisoformat(receivedts),
+                    content_type=content_type,
+                    payload=payload,
+                )
+                messages.append(message.to_dict())
+            return messages, max_sequence
         return read(self._database_context)
 
     def sequence_exists(self, token_id: int, sequence: int) -> bool:
@@ -734,7 +720,6 @@ class MsgBoxSQLiteRepository:
               "WHERE message_id = @message_id RETURNING id;"
         def write(db: Optional[sqlite3.Connection]=None) -> int:
             assert db is not None and isinstance(db, sqlite3.Connection)
-            params = (message_id,)
-            rows = db.execute(sql, params).fetchall()
+            rows = db.execute(sql, (message_id,)).fetchall()
             return len(rows)
         return self._database_context.run_in_thread(write)
