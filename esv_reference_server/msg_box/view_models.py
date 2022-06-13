@@ -2,11 +2,9 @@
 Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
-import base64
-import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TypedDict, Dict, Any, Union, cast, List
+from typing import TypedDict, Dict, Union, cast, List
 
 from esv_reference_server.msg_box.models import MsgBox
 
@@ -165,7 +163,7 @@ class MessageViewModelGet:
                 sequence=self.sequence,
                 received=self.received.isoformat(),
                 content_type=self.content_type,
-                payload=str(self.payload)
+                payload=self.payload.decode('utf-8')
             )
         else:
             return MessageViewModelGetBinary(
