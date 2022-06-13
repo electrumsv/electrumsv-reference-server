@@ -56,7 +56,7 @@ jobs:
 
     - script: |
         pytest --cov=esv_reference_server unittests --verbose
-      continueOnError: true
+      continueOnError: false
       displayName: 'Pytest with Coverage report'
 
 - job: TestMacOS
@@ -84,7 +84,7 @@ jobs:
 
   - script: |
       pytest --cov=esv_reference_server unittests --verbose
-    continueOnError: true
+    continueOnError: false
     displayName: 'Pytest with Coverage report'
 
 - job: TestWindows
@@ -112,5 +112,5 @@ jobs:
 
     - script: |
         pytest --cov=esv_reference_server unittests --verbose
-      continueOnError: true
+      continueOnError: false
       displayName: 'Pytest with Coverage report'

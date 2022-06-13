@@ -467,6 +467,7 @@ class TestAiohttpRESTAPI:
         request_body = {
             "key": "value"
         }
+        expected_response_body = base64.b64encode(json.dumps(request_body).encode('utf-8')).decode()
 
         # handler: write_message
         URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
@@ -486,7 +487,7 @@ class TestAiohttpRESTAPI:
         assert isinstance(datetime.datetime.fromisoformat(response_body['received']),
             datetime.datetime)
         assert response_body['content_type'] == 'application/json'
-        assert response_body['payload'] == {'key': 'value'}
+        assert response_body['payload'] == expected_response_body
 
     @pytest.mark.asyncio
     async def test_get_messages_head(self) -> None:
@@ -524,6 +525,9 @@ class TestAiohttpRESTAPI:
         _wrong_auth_type(URL, HTTP_METHOD)
         _bad_token(URL, HTTP_METHOD)
 
+        expected_response_body = base64.b64encode(
+            json.dumps({"key": "value"}).encode('utf-8')).decode()
+
         self.logger.debug("test_get_messages_head url: %s", URL)
         result = _successful_call(URL, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
@@ -534,7 +538,7 @@ class TestAiohttpRESTAPI:
         assert isinstance(datetime.datetime.fromisoformat(response_body[0]['received']),
             datetime.datetime)
         assert response_body[0]['content_type'] == 'application/json'
-        assert response_body[0]['payload'] == {'key': 'value'}
+        assert response_body[0]['payload'] == expected_response_body
 
     @pytest.mark.asyncio
     async def test_mark_message_read_or_unread(self) -> None:

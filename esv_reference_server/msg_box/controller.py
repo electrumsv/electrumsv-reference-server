@@ -384,7 +384,7 @@ async def write_message(request: web.Request) -> web.Response:
     body = await request.read()
 
     if request.content_type == "application/json":
-        body = base64.b64encode(body)
+        body = base64.b64encode(body).decode()
 
     # Write message to database
     message = Message(
