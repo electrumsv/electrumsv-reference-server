@@ -394,7 +394,7 @@ async def write_message(request: web.Request) -> web.Response:
         msg_box_api_token_id=api_token_row.id,
         content_type=request.content_type,
         payload=body,
-        received_ts=time.time()
+        received_ts=int(time.time())
     )
     try:
         result = msg_box_repository.write_message(message)

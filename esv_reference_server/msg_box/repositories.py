@@ -190,7 +190,7 @@ class MsgBoxSQLiteRepository:
                 description="Owner",
                 canread=True,
                 canwrite=True,
-                validfrom=time.time(),
+                validfrom=int(time.time()),
                 validto=None)
             cursor = self.create_msg_box_api_token(db, msg_box_api_token_row)
             id, account_id, msg_box_id, token, description, \
@@ -379,7 +379,7 @@ class MsgBoxSQLiteRepository:
             api_token_view_model_create.description,
             api_token_view_model_create.can_read,
             api_token_view_model_create.can_write,
-            time.time()
+            int(time.time())
         )
         def write(db: Optional[sqlite3.Connection]=None) \
                 -> Optional[tuple[int, str, str, int, int]]:
@@ -396,7 +396,7 @@ class MsgBoxSQLiteRepository:
     def get_api_token_by_id(self, token_id: int) -> Optional[APITokenViewModelGet]:
         sql = "SELECT id, token, description, canread, canwrite FROM msg_box_api_token " \
               "WHERE id = @token_id and (validto IS NULL OR validto >= @validto);"
-        params = (token_id, time.time())
+        params = (token_id, int(time.time()))
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[APITokenViewModelGet]:
             rows = db.execute(sql, params).fetchall()
@@ -414,7 +414,7 @@ class MsgBoxSQLiteRepository:
             FROM msg_box_api_token
             WHERE token = @token and (validto IS NULL OR validto >= @validto)
         """
-        params = (token, time.time())
+        params = (token, int(time.time()))
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[MsgBoxAPIToken]:
             row = db.execute(sql, params).fetchone()
@@ -440,7 +440,7 @@ class MsgBoxSQLiteRepository:
           AND (msg_box_api_token.validto IS NULL OR msg_box_api_token.validto >= @validto)
           AND (@token IS NULL or msg_box_api_token.token = @token);
         """
-        params = (external_id, time.time(), token)
+        params = (external_id, int(time.time()), token)
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> Optional[list[dict[str, Any]]]:
             rows = db.execute(sql, params).fetchall()
@@ -458,7 +458,7 @@ class MsgBoxSQLiteRepository:
 
     def delete_api_token(self, token_id: int) -> None:
         sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
-        params = (time.time(), token_id)
+        params = (int(time.time()), token_id)
         def write(db: Optional[sqlite3.Connection]=None) -> None:
             assert db is not None and isinstance(db, sqlite3.Connection)
             db.execute(sql, params)
@@ -589,7 +589,7 @@ class MsgBoxSQLiteRepository:
                     WHERE message_status.message_id = message.id AND NOT message_status.isdeleted
                 );
         """
-        params = (external_id, api_key, time.time())
+        params = (external_id, api_key, int(time.time()))
         @replace_db_context_with_connection
         def read(db: sqlite3.Connection) -> int:
             rows = db.execute(sql, params).fetchall()
@@ -640,7 +640,7 @@ class MsgBoxSQLiteRepository:
             """
 
             sequence: int
-            receivedts: float
+            receivedts: int
             content_type: str
             payload: bytes
             messages = []

@@ -58,8 +58,8 @@ class MsgBoxAPITokenRow(NamedTuple):
     description: str
     canread: bool
     canwrite: bool
-    validfrom: float  # time.time()
-    validto: Optional[float]  # time.time()
+    validfrom: int  # time.time()
+    validto: Optional[int]  # time.time()
 
 
 class Message(NamedTuple):
@@ -67,7 +67,7 @@ class Message(NamedTuple):
     msg_box_api_token_id: int
     content_type: str
     payload: bytes
-    received_ts: float  # time.time()
+    received_ts: int  # time.time()
 
 
 class MessageMetadata(NamedTuple):
