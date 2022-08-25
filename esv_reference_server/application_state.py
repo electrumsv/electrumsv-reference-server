@@ -214,8 +214,9 @@ class ApplicationState(object):
                         break
                     current_rows.append(row)
 
-            self.logger.debug("Outbound data delivery of %d entries, next delay will be %0.2f",
-                len(current_rows), next_check_delay)
+            if len(current_rows) > 0:
+                self.logger.debug("Outbound data delivery of %d entries, next delay will be %0.2f",
+                    len(current_rows), next_check_delay)
 
             date_created = int(time.time())
             log_creation_rows = list[OutboundDataLogRow]()
@@ -410,19 +411,22 @@ class ApplicationState(object):
                     continue
 
                 msg_box = notification['msg_box']
-                self.logger.debug("Got peer channel notification for channel_id: %s",
-                    msg_box.id)
 
-                if not len(self.get_msg_box_ws_clients()):
-                    self.logger.debug("No connected web sockets")
+                if len(self.get_msg_box_ws_clients()) == 0:
+                    self.logger.debug("Skipped web socket notifications for peer channel id=%d",
+                        msg_box.id)
                     continue
+
+                self.logger.debug("Broadcasting web socket notifications for peer channel "
+                    "id: %d", msg_box.id)
 
                 # Send new message notifications to the relevant (and authenticated)
                 # websocket client (based on msg_box_id)
                 # Todo - key: value cache to lookup the relevant client
                 ws_clients = self.get_msg_box_ws_clients_by_channel_id(msg_box.id)
                 for ws_client in ws_clients:
-                    self.logger.debug("Sending msg to ws_id: %s", ws_client.ws_id)
+                    self.logger.debug("Sending peer channel notification to ws_id: %s",
+                        ws_client.ws_id)
                     if ws_client.msg_box_internal_id == notification['msg_box'].id:
                         try:
                             msg = json.dumps(notification['notification'])
@@ -490,7 +494,7 @@ class ApplicationState(object):
         try:
             while not self._exit_event.is_set():
                 account_id, message_kind, payload = await self.account_message_queue.get()
-                self.logger.debug("Got account notification, account_id=%d", account_id)
+                self.logger.debug("Sending web socket messages to account id=%d", account_id)
 
                 websocket_state = self.get_websocket_state_for_account_id(account_id)
                 if websocket_state is None:

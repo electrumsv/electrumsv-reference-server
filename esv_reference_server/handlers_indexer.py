@@ -351,10 +351,6 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
     Used by the client to unregister pushdata hashes they are monitoring.
     """
     # TODO(1.4.0) This should be monetised with a free quota.
-    accept_type = request.headers.get('Accept', "application/json")
-    if accept_type not in { "application/json", "application/octet-stream" }:
-        raise web.HTTPBadRequest(reason="unknown request body content type")
-
     app_state: ApplicationState = request.app['app_state']
 
     auth_string = request.headers.get('Authorization', None)
@@ -412,7 +408,8 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
             account_id, list(pushdata_hashes),
             update_flags=IndexerPushdataRegistrationFlag.DELETING,
             filter_flags=IndexerPushdataRegistrationFlag.FINALISED,
-            filter_mask=IndexerPushdataRegistrationFlag.MASK_FINALISED_DELETING_CLEAR,
+            filter_mask=IndexerPushdataRegistrationFlag.FINALISED |
+                IndexerPushdataRegistrationFlag.DELETING,
             require_all=True)
     except DatabaseStateModifiedError:
         raise web.HTTPBadRequest(reason=f"{APIErrors.PUSHDATA_HASHES_NOT_REGISTERED}: "
@@ -443,6 +440,7 @@ async def indexer_post_transaction_filter_delete(request: web.Request) -> web.Re
                 update_flags=IndexerPushdataRegistrationFlag.FINALISED,
                 update_mask=IndexerPushdataRegistrationFlag.MASK_DELETING_CLEAR)
     assert response is not None
+    # ElectrumSV currently expects an empty 200 response (the simple indexer provides that).
     return response
 
 

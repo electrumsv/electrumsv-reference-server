@@ -102,7 +102,6 @@ def get_external_server_application(app_state: ApplicationState) -> web.Applicat
         # Message Box Push / Pull API
         web.post("/api/v1/channel/{channelid}", msg_box.controller.write_message),
         # web.head is added automatically by web.get in aiohttp
-        # NOTE(hardcoded-url) Update this if updating the server URL.
         web.get("/api/v1/channel/{channelid}", msg_box.controller.get_messages),
         web.post("/api/v1/channel/{channelid}/{sequence}",
             msg_box.controller.mark_message_read_or_unread),

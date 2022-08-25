@@ -58,7 +58,8 @@ def _auth_for_channel_token(request: web.Request,
         or ((request.method.lower() == 'get' or request.method.lower() == 'head')
             and not token_row.can_read)):
         raise web.HTTPUnauthorized()
-    logger.debug("Checking per-channel API token authentication: %s", token)
+    # NOTE(rt12) Removed logging of the provided token. That is not a good practice.
+    logger.debug("Checking per-channel API token authentication")
     internal_message_box_id = msg_box_repository.get_api_token_authorization_data_for_msg_box(
         external_id, token_row.id)
     if internal_message_box_id is None:
@@ -68,7 +69,6 @@ def _auth_for_channel_token(request: web.Request,
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
     app_state: ApplicationState = request.app['app_state']
-    # NOTE(hardcoded-url) Update this if updating the server URL.
     href = f"http://{app_state.external_host}:{app_state.external_port}"+ \
         f"/api/v1/channel/{msg_box.external_id}"
     return MsgBoxViewModelGet.from_msg_box(msg_box, href=href)
@@ -497,7 +497,7 @@ async def get_messages(request: web.Request) -> web.Response:
     response_headers = {
         'User-Agent': 'ESV-Ref-Server',
         'Access-Control-Expose-Headers': 'authorization,etag',
-        'ETag': str(max_sequence2),
+        'ETag': max_sequence2,
     }
     return web.json_response(message_list, headers=response_headers)
 
