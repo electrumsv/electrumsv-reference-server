@@ -15,7 +15,7 @@ except ModuleNotFoundError:
     # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
     import sqlite3  # type: ignore
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Optional
 from datetime import datetime, timezone
 
 from electrumsv_database.sqlite import DatabaseContext, replace_db_context_with_connection
@@ -24,8 +24,8 @@ from .. import utils
 from ..errors import APIErrors
 from . import models, view_models
 from .models import MsgBox, MsgBoxAPIToken, MessageMetadata, Message
-from .view_models import APITokenViewModelGet, MessageViewModelGetJSON, \
-    MessageViewModelGetBinary, MsgBoxViewModelAmend, MessageViewModelGet
+from .types import MessageRow
+from .view_models import APITokenViewModelGet, MsgBoxViewModelAmend
 
 
 class PeerChannelMessageWriteError(Exception):
@@ -484,10 +484,9 @@ class MsgBoxSQLiteRepository:
             return cast(int, rows[0][0])
         return read(self._database_context)
 
-    def write_message(self, message: Message) -> tuple[int, MessageViewModelGet]:
+    def write_message(self, message: Message) -> MessageRow:
         """Returns an error code and error reason"""
-        def write(db: Optional[sqlite3.Connection]=None) \
-                -> tuple[int, MessageViewModelGet]:
+        def write(db: Optional[sqlite3.Connection]=None) -> MessageRow:
             assert db is not None and isinstance(db, sqlite3.Connection)
             # Translating this query from postgres -> SQLite
             # The "FOR UPDATE" lock can be dropped because SQLite does broad-brush/global db locking
@@ -525,16 +524,12 @@ class MsgBoxSQLiteRepository:
             params2 = (message.msg_box_api_token_id, message.msg_box_id, message.received_ts,
                 message.content_type, message.payload)
             rows = db.execute(sql, params2).fetchall()
-            message_id: int
-            if len(rows) != 0:
-                message_id, fromtoken, msg_box_id, seq, receivedts, contenttype, payload = rows[0]
-                message_view_model_get = view_models.MessageViewModelGet(sequence=seq,
-                    received=datetime.fromtimestamp(receivedts, tz=timezone.utc),
-                    content_type=contenttype, payload=payload)
-                self.logger.debug("Wrote message sequence: %s for msg_box_id: %s",
-                    seq, msg_box_id)
-            else:
+            if len(rows) == 0:
                 raise PeerChannelMessageWriteError(code=APIErrors.DATABASE_WRITE_FAILURE)
+
+            message_row = MessageRow(*rows[0])
+            self.logger.debug("Wrote message sequence: %s for msg_box_id: %s",
+                message_row.sequence, message_row.message_box_id)
 
             sql = """
                 INSERT INTO message_status
@@ -549,9 +544,10 @@ class MsgBoxSQLiteRepository:
                 FROM msg_box_api_token
                 WHERE validto IS NULL AND msg_box_id = @msg_box_id
             """
-            params3 = (message_id, fromtoken, msg_box_id)
+            params3 = (message_row.message_id, message_row.from_token_id,
+                message_row.message_box_id)
             db.execute(sql, params3)
-            return message_id, message_view_model_get
+            return message_row
         return self._database_context.run_in_thread(write)
 
     def get_unread_messages_count(self, db: sqlite3.Connection, msg_box_api_token_id: int) -> int:
@@ -599,11 +595,10 @@ class MsgBoxSQLiteRepository:
             return seq if seq is not None else 0
         return read(self._database_context)
 
-    def get_messages(self, api_token_id: int, onlyunread: bool) \
-            -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]], str]:
+    def get_messages(self, api_token_id: int, onlyunread: bool) -> tuple[list[MessageRow],
+            int | None]:
         @replace_db_context_with_connection
-        def read(db: sqlite3.Connection) \
-                -> tuple[list[Union[MessageViewModelGetJSON, MessageViewModelGetBinary]], str]:
+        def read(db: sqlite3.Connection) -> tuple[list[MessageRow], int | None]:
             sql = """
                 SELECT msg_box.sequenced
                 FROM msg_box
@@ -613,7 +608,7 @@ class MsgBoxSQLiteRepository:
             """
             rows = db.execute(sql, (api_token_id,)).fetchall()
             if len(rows) == 0:
-                return [], ""
+                return [], None
 
             sequenced = rows[0][0]
             if sequenced:
@@ -624,9 +619,9 @@ class MsgBoxSQLiteRepository:
                     WHERE message_status.token_id = @tokenid AND NOT message_status.isdeleted;
                 """
                 sequence_row = db.execute(sql, (api_token_id,)).fetchone()
-                max_sequence = str(sequence_row[0]) if sequence_row is not None else "0"
+                max_sequence = sequence_row[0] if sequence_row is not None else 0
             else:
-                max_sequence = ""
+                max_sequence = None
 
             sql = """
                 SELECT message.*
@@ -638,22 +633,8 @@ class MsgBoxSQLiteRepository:
                     AND (message_status.isread = false OR @onlyunread = false)
                 ORDER BY message.seq;
             """
-
-            sequence: int
-            receivedts: int
-            content_type: str
-            payload: bytes
-            messages = []
-            for row in db.execute(sql, (api_token_id, onlyunread)).fetchall():
-                id, fromtoken, msg_box_id, sequence, receivedts, content_type, payload = row
-
-                message = view_models.MessageViewModelGet(
-                    sequence=sequence,
-                    received=datetime.fromtimestamp(receivedts, tz=timezone.utc),
-                    content_type=content_type,
-                    payload=payload,
-                )
-                messages.append(message.to_dict())
+            messages = [ MessageRow(*row) for row in
+                db.execute(sql, (api_token_id, onlyunread)).fetchall() ]
             return messages, max_sequence
         return read(self._database_context)
 

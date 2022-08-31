@@ -29,8 +29,9 @@ from ..utils import _try_read_bearer_token
 
 from .models import Message, MsgBox, MsgBoxAPIToken
 from .repositories import MsgBoxSQLiteRepository, PeerChannelMessageWriteError
-from .view_models import RetentionViewModel, MsgBoxViewModelGet, \
-    MsgBoxViewModelCreate, MsgBoxViewModelAmend, APITokenViewModelCreate
+from .types import MessageTextResponse
+from .view_models import APITokenViewModelCreate, MsgBoxViewModelGet, \
+    MsgBoxViewModelCreate, MsgBoxViewModelAmend, RetentionViewModel
 
 if TYPE_CHECKING:
     from ..application_state import ApplicationState
@@ -391,21 +392,18 @@ async def write_message(request: web.Request) -> web.Response:
                                             max_size=MAX_MESSAGE_CONTENT_LENGTH,
                                             actual_size=content_length)
 
-    body = await request.read()
-
-    if request.content_type == "application/json":
-        body = base64.b64encode(body).decode().encode('utf-8')
+    payload_bytes = await request.read()
 
     # Write message to database
     message = Message(
         msg_box_id=message_box_row.id,
         msg_box_api_token_id=api_token_row.id,
         content_type=request.content_type,
-        payload=body,
+        payload=payload_bytes,
         received_ts=int(time.time())
     )
     try:
-        result = msg_box_repository.write_message(message)
+        message_row = msg_box_repository.write_message(message)
     except PeerChannelMessageWriteError as exc:
         if exc.code == APIErrors.CHANNEL_LOCKED:
             raise web.HTTPBadRequest(reason=f"{APIErrors.CHANNEL_LOCKED}: "
@@ -421,9 +419,7 @@ async def write_message(request: web.Request) -> web.Response:
         else:
             raise web.HTTPInternalServerError()
 
-    assert result is not None
-    message_id, msg_box_get_view = result
-    logger.info("Message %s from api_token_id: %s written to channel %s", message_id,
+    logger.info("Message %s from api_token_id: %s written to channel %s", message_row.message_id,
         api_token_row.id, external_id)
 
     # Send push notification
@@ -442,7 +438,15 @@ async def write_message(request: web.Request) -> web.Response:
     app_state.account_message_queue.put_nowait(AccountMessage(message_box_row.account_id,
         AccountMessageKind.PEER_CHANNEL_MESSAGE, channel_msg))
 
-    return web.json_response(msg_box_get_view.to_dict())
+    message_text = base64.b64encode(message_row.payload_bytes).decode()
+    message_text_response: MessageTextResponse = {
+        "sequence": message_row.sequence,
+        "received": datetime.fromtimestamp(message_row.date_received, tz=timezone.utc)
+            .isoformat().replace("+00:00", "Z"),
+        "content_type": message_row.content_type,
+        "payload": message_text,
+    }
+    return web.json_response(message_text_response)
 
 
 async def get_messages(request: web.Request) -> web.Response:
@@ -454,8 +458,8 @@ async def get_messages(request: web.Request) -> web.Response:
 
     external_id = request.match_info.get('channelid')
     if external_id is None:
-        raise web.HTTPNotFound(reason=f"{APIErrors.MISSING_PATH_PARAMETER}: "
-                                      "Channel ID not provided.")
+        raise web.HTTPNotFound(
+            reason=f"{APIErrors.MISSING_PATH_PARAMETER}: Channel ID not provided.")
 
     onlyunread = False
     if request.query.get('unread', "false") == "true":
@@ -472,15 +476,16 @@ async def get_messages(request: web.Request) -> web.Response:
     if request.method == 'HEAD':
         logger.debug("Head called for msg_box: %s", external_id)
 
-        max_sequence = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
-        if max_sequence is None:
-            raise web.HTTPNotFound()
+        max_sequence1 = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
+        # NOTE(rt12) `None` is never returned..
+        # if max_sequence is None:
+        #     raise web.HTTPNotFound()
 
-        logger.debug("Head max sequence of msg_box: %s is %s", external_id, max_sequence)
+        logger.debug("Head max sequence of msg_box: %s is %s", external_id, max_sequence1)
         response_headers = {
-            'User-Agent': 'ESV-Ref-Server',
+            'User-Agent': 'ElectrumSV-server',
             'Access-Control-Expose-Headers': 'authorization,etag',
-            'ETag': str(max_sequence),
+            'ETag': str(max_sequence1),
         }
         return web.Response(headers=response_headers)
 
@@ -493,20 +498,31 @@ async def get_messages(request: web.Request) -> web.Response:
 
     assert msg_box_api_token_obj is not None
     logger.info("Get messages for channel_id: %s", external_id)
-    # Todo - use a generator here and sequentially write the messages out to a streamed response
-    result = msg_box_repository.get_messages(msg_box_api_token_obj.id, onlyunread)
-    if result is None:
-        raise web.HTTPNotFound(reason=f"{APIErrors.MESSAGES_NOT_FOUND}: "
-                                      "Messages not found or not sequenced.")
+    message_rows_and_sequence = msg_box_repository.get_messages(msg_box_api_token_obj.id,
+        onlyunread)
+    if message_rows_and_sequence is None:
+        raise web.HTTPNotFound(
+            reason=f"{APIErrors.MESSAGES_NOT_FOUND}: Messages not found or not sequenced.")
 
-    message_list, max_sequence2 = result
-    logger.info("Returning %d messages for channel: %s", len(message_list), external_id)
+    message_rows, max_sequence2 = message_rows_and_sequence
+    logger.info("Returning %d messages for channel: %s", len(message_rows), external_id)
 
     response_headers = {
-        'User-Agent': 'ESV-Ref-Server',
+        'User-Agent': 'ElectrumSV-server',
         'Access-Control-Expose-Headers': 'authorization,etag',
-        'ETag': max_sequence2,
+        'ETag': "" if max_sequence2 is None else str(max_sequence2),
     }
+
+    message_list: list[MessageTextResponse] = []
+    for message_row in message_rows:
+        message_text = base64.b64encode(message_row.payload_bytes).decode()
+        message_list.append({
+            "sequence": message_row.sequence,
+            "received": datetime.fromtimestamp(message_row.date_received, tz=timezone.utc)
+                .isoformat().replace("+00:00", "Z"),
+            "content_type": message_row.content_type,
+            "payload": message_text,
+        })
     return web.json_response(message_list, headers=response_headers)
 
 
@@ -612,6 +628,7 @@ async def delete_message(request: web.Request) -> web.Response:
                                         "Retention period has not yet expired.")
 
     token_data = msg_box_repository.get_api_token(msg_box_api_token)
+    assert token_data is not None
     count_deleted = msg_box_repository.delete_message(message_metadata.id, token_data.id)
     logger.info("Deleted %s messages for sequence: %s in msg_box: %s", count_deleted, sequence,
         external_id)
