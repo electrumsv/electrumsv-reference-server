@@ -52,11 +52,19 @@ def _auth_for_channel_token(request: web.Request,
                                           "Peer channel token expired.")
 
     if (request.method.lower() == 'post'
-            and (handler_name == 'mark_message_read_or_unread' and not token_row.can_read
-                 or handler_name != 'mark_message_read_or_unread' and not token_row.can_write)
-        or (request.method.lower() == 'delete' and not token_row.can_write)
-        or ((request.method.lower() == 'get' or request.method.lower() == 'head')
-            and not token_row.can_read)):
+            and (handler_name == 'mark_message_read_or_unread' and not token_row.can_read or
+                 handler_name != 'mark_message_read_or_unread' and not token_row.can_write)
+            or ((request.method.lower() == 'get' or request.method.lower() == 'head')
+                and not token_row.can_read)):
+
+        # NOTE: Divergence from original reference implementation occurs here.
+        #   This clause was removed:
+        #       `(request.method.lower() == 'delete' and not token_row.can_write)`
+        #  With this change, read only token holders can call "delete" but the message will not
+        #  be marked as deleted for other token holders for the channel.
+        #  The idea here is that when all token holders have called delete for a given message, only
+        #  then can the data be safely deleted by the server.
+        #  In contrast to `mark_message_read_or_unread`, calling `delete` is an irreversible action.
         raise web.HTTPUnauthorized()
     # NOTE(rt12) Removed logging of the provided token. That is not a good practice.
     logger.debug("Checking per-channel API token authentication")
@@ -603,7 +611,8 @@ async def delete_message(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason=f"{APIErrors.RETENTION_NOT_YET_EXPIRED}: "
                                         "Retention period has not yet expired.")
 
-    count_deleted = msg_box_repository.delete_message(message_metadata.id)
+    token_data = msg_box_repository.get_api_token(msg_box_api_token)
+    count_deleted = msg_box_repository.delete_message(message_metadata.id, token_data.id)
     logger.info("Deleted %s messages for sequence: %s in msg_box: %s", count_deleted, sequence,
         external_id)
     raise web.HTTPOk()
