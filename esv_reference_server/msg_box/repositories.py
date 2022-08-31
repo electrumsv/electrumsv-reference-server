@@ -721,11 +721,12 @@ class MsgBoxSQLiteRepository:
             return None
         return read(self._database_context)
 
-    def delete_message(self, message_id: int) -> int:
+    def delete_message(self, message_id: int, token_id: int) -> int:
         sql = "UPDATE message_status SET isdeleted = true " \
-              "WHERE message_id = @message_id RETURNING id;"
+              "WHERE token_id = @token_id AND message_id = @message_id " \
+              "RETURNING id;"
         def write(db: Optional[sqlite3.Connection]=None) -> int:
             assert db is not None and isinstance(db, sqlite3.Connection)
-            rows = db.execute(sql, (message_id,)).fetchall()
+            rows = db.execute(sql, (token_id, message_id,)).fetchall()
             return len(rows)
         return self._database_context.run_in_thread(write)
