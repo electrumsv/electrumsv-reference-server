@@ -573,33 +573,58 @@ class TestAiohttpRESTAPI:
         assert result.reason is not None
 
     @pytest.mark.asyncio
-    async def test_delete_message_read_only_token_should_fail(self) -> None:
+    async def test_delete_message_with_read_only_token(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
+            await self._create_read_only_token(CHANNEL_ID)
+        CHANNEL_READ_ONLY_TOKEN_ID2, CHANNEL_READ_ONLY_TOKEN2 = \
             await self._create_read_only_token(CHANNEL_ID)
         _response = self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         # handler: delete_message
         sequence = 1
-        URL = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+        url = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
             f"/api/v1/channel/{CHANNEL_ID}/{sequence}"
         HTTP_METHOD = 'delete'
-        _no_auth(URL, HTTP_METHOD)
-        _wrong_auth_type(URL, HTTP_METHOD)
-        _bad_token(URL, HTTP_METHOD)
+        _no_auth(url, HTTP_METHOD)
+        _wrong_auth_type(url, HTTP_METHOD)
+        _bad_token(url, HTTP_METHOD)
 
-        sequence = 1
-        url = URL.format(channelid=CHANNEL_ID, sequence=sequence)
-        result = _successful_call(url, HTTP_METHOD, None, None,
-            CHANNEL_READ_ONLY_TOKEN)
-        assert result.status_code == 401, result.reason
-
+        # Attempting to delete a non-existent message sequence should return 404 not found
         sequence = 2
-        url = URL.format(channelid=CHANNEL_ID, sequence=sequence)
-        result = _successful_call(url, HTTP_METHOD, None, None,
+        url2 = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}"+ \
+               f"/api/v1/channel/{CHANNEL_ID}/{sequence}"
+        result = _successful_call(url2, HTTP_METHOD, None, None,
             CHANNEL_READ_ONLY_TOKEN)
-        assert result.status_code == 401, result.reason
+        assert result.status_code == 404, result.reason
         assert result.reason is not None
+
+        # Message sequence 1 should still be visible for the CHANNEL_READ_ONLY_TOKEN2 holder
+        query_params = "?unread=true"
+        url_get_messages = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}" \
+                           f"/api/v1/channel/{CHANNEL_ID}" + query_params
+        result = _successful_call(url_get_messages, 'get', None, None,
+            CHANNEL_READ_ONLY_TOKEN2)
+        assert result.status_code == 200, result.reason
+        assert result.json()[0]['sequence'] == 1
+
+        # Message sequence 1 should be visible for the CHANNEL_BEARER_TOKEN holder but is marked as
+        # read
+        query_params = "?unread=true"
+        url_get_messages = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}" \
+                           f"/api/v1/channel/{CHANNEL_ID}" + query_params
+        result = _successful_call(url_get_messages, 'get', None, None,
+            CHANNEL_BEARER_TOKEN)
+        assert result.status_code == 200, result.reason
+        assert len(result.json()) == 0  # message is marked as read for the write token holder
+
+        query_params = "?read=true"
+        url_get_messages = f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}" \
+                           f"/api/v1/channel/{CHANNEL_ID}" + query_params
+        result = _successful_call(url_get_messages, 'get', None, None,
+            CHANNEL_BEARER_TOKEN)
+        assert result.status_code == 200, result.reason
+        assert result.json()[0]['sequence'] == 1  # but is not deleted (still retrievable)
 
     @pytest.mark.asyncio
     async def test_delete_message_should_succeed(self) -> None:

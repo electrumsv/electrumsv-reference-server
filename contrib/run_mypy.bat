@@ -6,6 +6,6 @@ REM Get current folder with no trailing slash
 SET ScriptDir=%~dp0
 SET SdkDir=%ScriptDir%\..
 pushd %SdkDir%
-mypy --install-types --non-interactive --python-version 3.10
+py -3.10 -m mypy --config-file mypy.ini --install-types --non-interactive --python-version 3.10
 popd
 
