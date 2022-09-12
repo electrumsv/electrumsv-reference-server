@@ -376,6 +376,9 @@ class ApplicationState(object):
     def get_msg_box_ws_clients_by_channel_id(self, msg_box_internal_id: int) \
             -> list[MsgBoxWSClient]:
         with self.msg_box_ws_clients_lock:
+            if msg_box_internal_id not in self.msg_box_ws_clients_map:
+                return []
+
             ws_ids = self.msg_box_ws_clients_map[msg_box_internal_id]
             ws_clients = []
             for ws_id in ws_ids:
