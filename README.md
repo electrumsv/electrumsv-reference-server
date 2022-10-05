@@ -127,6 +127,9 @@ administrator must set these environment variables:
 Endpoint                                                   | Method | Auth?  | Description
  --------------------------------------------------------- | ------ | ------ | -----------
  `/api/v1/restoration/search`                              | POST   | Yes    | Locate pushdata usage in the fixed height restoration index.
+ `/api/v1/transaction/filter`                              | GET    | Yes    | Read the currently registered pushdata hash filtering registrations.
+ `/api/v1/transaction/filter`                              | POST   | Yes    | Request new pushdata hash filtering registrations.
+ `/api/v1/transaction/filter:delete`                       | POST   | Yes    | Delete selected current registered pushdata hash filtering registrations.
  `/api/v1/transaction/{txid}`                              | GET    | Yes    | Get the given transaction.
  `/api/v1/merkle-proof/{txid}`                             | GET    | Yes    | Get the merkle proof for a given transaction.
  `/api/v1/output-spend`                                    | POST   | Yes    | Get the state of given UTXOs, whether in mempool or mined.
@@ -138,37 +141,14 @@ This is used for development of ElectrumSV projects and also to serve as an illu
 third parties need to do at a very simplistic level to develop their own implementations that
 can work on networks like Testnet, Mainnet and Scaling Testnet.
 
-### Paymail Hosting API
-
-*This is backlogged*
-
-All plans to support Paymail are currently backlogged, not for lack of interest, but rather to
-focus on the required APIs that we need for the basic wallet to work into the future.
-
 ## Pro-Rata Payment Protocol
 
 *This is a work in progress*
-
-Pro-rata payment for usage of this service is essential for long-term sustainability as the
-blockchain scales and the economic costs of maintaining such services starts to become a factor.
-It also provides an incentive for others to run services that ElectrumSV users can make use of.
-
-At the time of writing there is no standard protocol for using payment channels to pay for
-the use of an API. It is hoped that there one will eventuate and that this will provide a common
-way to monetise services that incorporate Bitcoin SV.
-
-Initially this reference server will provide a free quota and require opening a payment channel
-once that quota is consumed.
-
 
 ## Inclusion in the SDK
 This server will be included in the [ElectrumSV SDK](https://github.com/electrumsv/headless-sdk/releases)
 which aims to provide a first-class RegTest developer experience.
 This is by providing a quick-launch toolkit for running services against a RegTest node.
-
-## To update the swagger-ui version for hosting
-Follow these instructions: https://github.com/peter-evans/swagger-github-pages
-
 
 ## Running The ElectrumSV Reference Server
 On windows (requires Python 3.10):
