@@ -322,7 +322,7 @@ class ApplicationState(object):
                     else:
                         await asyncio.sleep(1)
                         continue
-                except aiohttp.ClientConnectorError as e:
+                except (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError) as e:
                     # logger.error("HeaderSV service is unavailable on %s", self.header_sv_url)
                     # Any new websocket connections will be notified when HeaderSV is back online
                     current_best_hash = ""
