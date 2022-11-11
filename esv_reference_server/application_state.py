@@ -303,7 +303,7 @@ class ApplicationState(object):
                 try:
                     url_to_fetch = f"{self.header_sv_url}/api/v1/chain/tips"
                     request_headers = {'Accept': 'application/json'}
-                    async with session.post(url_to_fetch, headers=request_headers) as resp:
+                    async with session.get(url_to_fetch, headers=request_headers) as resp:
                         assert resp.status == 200, resp.reason
                         result = await resp.json()
 
@@ -339,7 +339,7 @@ class ApplicationState(object):
 
                 url_to_fetch = f"{self.header_sv_url}/api/v1/chain/header/{current_best_hash}"
                 request_headers = {'Accept': 'application/octet-stream'}
-                async with await session.post(url_to_fetch, headers=request_headers) as resp:
+                async with await session.get(url_to_fetch, headers=request_headers) as resp:
                     assert resp.status == 200, resp.reason
                     raw_header = await resp.read()
 

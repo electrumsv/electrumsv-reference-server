@@ -375,9 +375,13 @@ async def write_message(request: web.Request) -> web.Response:
 
     MAX_MESSAGE_CONTENT_LENGTH = int(os.getenv('MAX_MESSAGE_CONTENT_LENGTH', '0'))
 
-    if request.content_type is None or request.content_type == '':
-        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_HEADER}: "
-                                        "Missing content-type header.")
+    # https://docs.aiohttp.org/en/stable/web_reference.html -> see "content_type
+    # Return value is 'application/octet-stream' if no Content-Type header present in HTTP headers
+    # according to RFC 2616. So this check may be unreliable in that if content type is not set,
+    # aiohttp intervenes and sets 'application/octet-stream' anyway.
+    if request.content_type not in {'application/octet-stream', 'application/json'}:
+        raise web.HTTPBadRequest(reason=f"{APIErrors.MISSING_HEADER}: content-type header must be "
+            f"either 'application/octet-stream' or 'application/json'")
 
     content_length = request.content_length if request.content_length else 0
 

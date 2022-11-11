@@ -125,13 +125,11 @@ class TestAiohttpRESTAPI:
                 CHANNEL_READ_ONLY_TOKEN = response_body['token']
                 return CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN
 
-    @pytest.mark.asyncio
     def test_ping(self) -> None:
         URL = "http://{host}:{port}/".format(host=TEST_EXTERNAL_HOST, port=TEST_EXTERNAL_PORT)
         result = requests.get(URL)
         assert result.text is not None
 
-    @pytest.mark.asyncio
     def test_create_new_channel(self) -> None:
         URL = 'http://{host}:{port}/api/v1/channel/manage'.format(host=TEST_EXTERNAL_HOST,
             port=TEST_EXTERNAL_PORT)
@@ -213,7 +211,6 @@ class TestAiohttpRESTAPI:
         }
         assert response_body == expected_response_body
 
-    @pytest.mark.asyncio
     def test_list_channels(self) -> None:
         # handler: list_channels
         URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
@@ -396,7 +393,7 @@ class TestAiohttpRESTAPI:
     # MESSAGE MANAGEMENT APIS - USE CHANNEL-SPECIFIC BEARER TOKEN NOW
 
     @pytest.mark.asyncio
-    async def test_write_message_no_content_type_should_raise_400(self) -> None:
+    async def test_write_message_unsupported_content_type_should_raise_400(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
 
         # handler: write_message
@@ -408,10 +405,8 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
         request_body = {"key": "value"}
-        self.logger.debug("test_write_message_no_content_type_should_raise_400 url: %s", URL)
-        headers = {
-            "Content-Type": "",
-        }
+        self.logger.debug("test_write_message_unsupported_content_type_should_raise_400 url: %s", URL)
+        headers = {'Content-Type': 'application/text'}
         result = _successful_call(URL, HTTP_METHOD, headers, request_body, CHANNEL_BEARER_TOKEN)
         assert result.status_code == HTTPStatus.BAD_REQUEST, result.reason
         assert result.reason is not None
@@ -679,7 +674,6 @@ class TestAiohttpRESTAPI:
                 if e.status == 401:
                     raise WebsocketUnauthorizedException()
 
-    @pytest.mark.asyncio
     def test_channels_websocket_bad_auth_should_fail(self) -> None:
         async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int,
                 completion_event: asyncio.Event) -> None:
@@ -694,7 +688,6 @@ class TestAiohttpRESTAPI:
         url = WS_URL_TEMPLATE_MSG_BOX.format(channelid=CHANNEL_ID)
         asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
 
-    @pytest.mark.asyncio
     def test_channels_websocket(self) -> None:
         logger = logging.getLogger("websocket-test")
         async def wait_on_sub(url: str, msg_box_api_token: str, expected_count: int,
@@ -746,7 +739,6 @@ class TestAiohttpRESTAPI:
 
         asyncio.run(main())
 
-    @pytest.mark.asyncio
     def test_general_purpose_websocket_bad_auth_should_fail(self) -> None:
         async def wait_on_sub(url: str, api_token: str,
                               expected_count: int, completion_event: asyncio.Event) -> None:
@@ -761,7 +753,6 @@ class TestAiohttpRESTAPI:
         url = WS_URL_GENERAL
         asyncio.run(wait_on_sub(url, "BAD_BEARER_TOKEN", 0, completion_event))
 
-    @pytest.mark.asyncio
     def test_general_purpose_websocket_peer_channel_notifications(self) -> None:
         logger = logging.getLogger("websocket-test")
         async def manage_general_websocket_connection(url: str, api_token: str, expected_count: int,
