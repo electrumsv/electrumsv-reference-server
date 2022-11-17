@@ -289,6 +289,8 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
             except (ValueError, TypeError):
                 raise web.HTTPBadRequest(reason="one or more payload entries are incorrect")
             registration_entries.append(TipFilterRegistrationEntry(pushdata_hash, entry[1]))
+
+        body_bytes = json.dumps(registration_entries_json).encode('utf-8')
     elif content_type == 'application/octet-stream':
         if len(body) % tip_filter_registration_struct.size != 0:
             raise web.HTTPBadRequest(reason="binary request body malformed")
@@ -313,14 +315,6 @@ async def indexer_post_transaction_filter(request: web.Request) -> web.Response:
     if date_created is None:
         raise web.HTTPBadRequest(reason=f"{APIErrors.PUSHDATA_HASHES_ALREADY_REGISTERED}: "
                                         "some pushdata hashes already registered")
-
-    # Pass on the registrations to the indexer. The indexer just supports binary as it is
-    # not exposed publically, so we reserialise the hashes if necessary.
-    if body_bytes is None:
-        body_bytes = bytearray(len(registration_entries) * tip_filter_registration_struct.size)
-        for data_index, registration_data in enumerate(registration_entries):
-            tip_filter_registration_struct.pack_into(body_bytes,
-                data_index * tip_filter_registration_struct.size, *registration_data)
 
     logger.debug("Registering pushdata hashes with indexer")
     response: Optional[web.Response] = None
