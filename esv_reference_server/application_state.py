@@ -31,7 +31,7 @@ except ModuleNotFoundError:
 
 from .constants import ACCOUNT_MESSAGE_NAMES, Network, OutboundDataFlag
 from .indexer_support import maintain_indexer_connection_async, unregister_unwanted_spent_outputs
-from .keys import create_regtest_server_keys, ServerKeys
+from .keys import create_regtest_server_keys, ServerKeys, get_server_keys
 from .msg_box.repositories import MsgBoxSQLiteRepository
 from . import sqlite_db
 from .types import AccountMessage, AccountWebsocketState, GeneralNotification, \
@@ -82,9 +82,7 @@ class ApplicationState(object):
         if network == network.REGTEST:
             self.server_keys = create_regtest_server_keys()
         else:
-            # TODO(temporary-prototype-choice) Have some way of finding the non-regtest keys.
-            #     Error if they cannot be found.
-            raise NotImplementedError
+            self.server_keys = get_server_keys()
 
         self._exit_event = asyncio.Event()
         self.aiohttp_session = aiohttp.ClientSession()

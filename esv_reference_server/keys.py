@@ -1,10 +1,15 @@
+from bitcoinx import PrivateKey, PublicKey, sha256
+import logging
+import os
 import struct
+import sys
 from typing import NamedTuple, TypedDict, cast
 
-from bitcoinx import PrivateKey, PublicKey, sha256
 
 from .constants import REGTEST_IDENTITY_PRIVATE_KEY, REGTEST_IDENTITY_PUBLIC_KEY
 
+
+logger = logging.getLogger('keys')
 
 # TODO(temporary-prototype-choice) Rotating server identity public/private keys based on date?
 class ServerKeys(NamedTuple):
@@ -14,6 +19,21 @@ class ServerKeys(NamedTuple):
 
 def create_regtest_server_keys() -> ServerKeys:
     return ServerKeys(REGTEST_IDENTITY_PRIVATE_KEY, REGTEST_IDENTITY_PUBLIC_KEY)
+
+
+def get_server_keys() -> ServerKeys:
+    try:
+        PRIVATE_KEY_HEX = os.environ['SERVER_PRIVATE_KEY']
+    except KeyError:
+        logger.error("'SERVER_PRIVATE_KEY' is a required environment variable")
+        sys.exit(1)
+
+    assert len(PRIVATE_KEY_HEX) == 64, "Server private key must be 32 hex bytes in length"
+    PRIVATE_KEY = PrivateKey.from_hex(PRIVATE_KEY_HEX)
+    IDENTITY_MESSAGE = sha256(b"identity 20211117 zzz")
+    IDENTITY_PRIVATE_KEY = PRIVATE_KEY.add(IDENTITY_MESSAGE)
+    IDENTITY_PUBLIC_KEY = REGTEST_IDENTITY_PRIVATE_KEY.public_key
+    return ServerKeys(IDENTITY_PRIVATE_KEY, IDENTITY_PUBLIC_KEY)
 
 
 class VerifiableKeyData(TypedDict):
