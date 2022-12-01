@@ -146,7 +146,7 @@ class HeadersWebSocket(web.View):
     async def get(self) -> WebSocketResponse:
         """The communication for this is one-way - for header notifications only.
         Client messages will be ignored"""
-        ws = web.WebSocketResponse()
+        ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(self.request)
         ws_id = str(uuid.uuid4())
         client = HeadersWSClient(ws_id=ws_id, websocket=ws)

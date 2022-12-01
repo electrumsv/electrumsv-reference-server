@@ -49,7 +49,7 @@ class GeneralWebSocket(web.View):
         if accept_type_text == "*/*":
             accept_type_text = 'application/json'
         accept_type = cast(AccountWebsocketMediaType, accept_type_text)
-        websocket_response = web.WebSocketResponse()
+        websocket_response = web.WebSocketResponse(heartbeat=30)
         await websocket_response.prepare(self.request)
         websocket_state = AccountWebsocketState(
             ws_id=ws_id,

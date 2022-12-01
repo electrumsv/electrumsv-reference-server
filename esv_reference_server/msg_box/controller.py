@@ -668,7 +668,7 @@ class MsgBoxWebSocket(web.View):
             raise web.HTTPUnauthorized(reason=f"{APIErrors.INVALID_BEARER_TOKEN}: "
                                               f"Unauthorized - invalid Bearer Token")
 
-        ws = web.WebSocketResponse()
+        ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(self.request)
         client = MsgBoxWSClient(
             ws_id=ws_id, websocket=ws,
