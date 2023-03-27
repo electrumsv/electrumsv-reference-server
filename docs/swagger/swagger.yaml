@@ -815,6 +815,28 @@ paths:
   /api/v1/indexer:
     get:
       summary: Get indexer settings for the account associated with the bearer token.
+      description: |
+        At this time this is only used to put in place a tip filter callback URL where matches for registered tip filter pushdata hashes are delivered.
+
+          Messages posted to the callback URL are of the structure:
+
+          ```
+          {
+            "blockId": "0000000000000000021f7fa2c33c4e36f040acfeda8cc1fd1ba24581b3988da9",
+            "matches": [
+                "pushDataHashHex": "f33c760e5b0b1a48e95bf4d83bb7d2315ac733770572c78c81b98b83e48bc818",
+                "transactionId": "99df8472e2f7e3f5966d8c277b776c6f31fec5f5653de1c2ea4c4f9d97c9848b",
+                "transactionIndex": 0,
+                "flags": 1,
+            ]
+          }
+          ```
+
+          Notes:
+
+
+          * The block id is the canonically encoded hexadecimal representation of the block hash. If the matches are in the mempool, then it will be `null`.
+          * Flags indicate if the match is in a transaction input or output, `1 << 0` is in an output script, `1 << 1` is in an input script.
       security:
         - BearerAuth: [ ]
       tags:
@@ -939,15 +961,124 @@ paths:
         '503':
           description: Indexer services are currently inaccessible.
 
+  /api/v1/transaction/filter:
+    get:
+      summary: Get the currently registered pushdata hashes for tip filtering.
+      description: >-
+        What pushdata hashes are being filtered for, from what date and how long each the filter for each is in place.
+      security:
+        - BearerAuth: [ ]
+      tags:
+        - Indexer
+      responses:
+        '200':
+          description: Get the current tip filter registrations.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                default: Packed lump of consecutive 40 byte chunks each comprised of the registered pushdata hash (32 bytes), the date created (4 bytes big endian) and the date expires (4 bytes big endian).
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipFilterListResponseJSON'
+        '400':
+          description: Unsupported content type.
+        '401':
+          description: Invalid or missing API key type.
+        '503':
+          description: Indexer services are currently inaccessible.
+    post:
+      tags:
+      - Indexer
+      summary: "Create new pushdata filter registrations with the service"
+      description: |
+        If an application wants to know about the appearance of some data or a payment on the blockchain, it will request the indexer track pushdata hashes to monitor for a given duration. A pushdata hash is the SHA256 hash of either a public key or a public key hash. This indexer accepts durations from 5 minutes to 7 days in length.
+
+
+        The indexer processes all new transactions and blocks, and batches matches in either input or output scripts to deliver to registered applications as an HTTP callback. The HTTP callback and the structure of the callback is currently specified within the indexer settings of this specification (see GET /api/v1/indexer).
+
+
+        Example use cases (in order of relevance):
+
+        * A wallet user is soliciting a payment from another party. The wallet generates a new key and then registers it successfully with the indexer. The user is then shown a payment URL which includes both expiry date, payment destination including the key and the requested amount. They give this to the other party who can broadcast a payment transaction and know that the wallet user will receive it.
+
+        * A wallet wants to communicate with one or more other parties on the blockchain. It can use a public key or sequence of non-reused public keys to hear about new occurrences of related transactions, as long as it has registered the key usage ahead of time.
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: "The desired filter registrations to create."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TipFilterRegistrationRequestJSON"
+          application/octet-stream:
+            schema:
+              $ref: "#/components/schemas/TipFilterRegistrationRequestBinary"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TipFilterRegistrationResponseJSON"
+              example:
+                {
+                  dateCreated: 1679951723
+                }
+        '400':
+          description: Invalid API key type or empty request body.
+        '401':
+          description: Invalid or missing API key type.
+        '503':
+          description: Indexer services are currently inaccessible.
+
+  /api/v1/transaction/filter:delete:
+    post:
+      tags:
+      - Indexer
+      summary: Remove these tip filter registrations.
+      description: |
+        Remove the filters for the specified pushdata hashes.
+
+          This is a batch operation and it is assumed that the application knows what it is doing. All the
+          pushdata hashes must be present and removed or none are removed.
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        description: "The desired filter registrations to remove."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TipFilterDeletionRequestJSON"
+          application/octet-stream:
+            schema:
+              $ref: "#/components/schemas/TipFilterDeletionRequestBinary"
+      responses:
+        '200':
+          description: Successful deletion.
+        '400':
+          description: Invalid API key type, empty request body, unparseable data, one or more invalid deletion hashes.
+        '401':
+          description: Invalid or missing API key type.
+        '503':
+          description: Indexer services are currently inaccessible.
+
   /api/v1/output-spend:
     post:
       tags:
       - Indexer
-      summary: "Search for usage of these outputs in the mempool and mined transactions"
+      summary: "Query the state of the specified outputs in the mempool and mined transactions"
+      description: |
+        Provides a way to get the current state of the specified outputs. Any that are unknown will not have an entry in the response. Any that are known will have an entry in the response. The response will indicate what they were spent by, and whether it is in the mempool or a block on the indexer's preferred chain fork.
+
+          It is not necessary to use this before registering for notifications about updates to the outputs as the act of registering for notifications returns the current state.
       security:
         - BearerAuth: [ ]
       requestBody:
-        description: "The outpoints to look for usage of."
+        description: "The outpoints to query for usage of."
         required: true
         content:
           application/json:
@@ -962,16 +1093,8 @@ paths:
                 $ref: "#/components/schemas/OutputSpendResponseJSON"
             application/octet-stream:
               schema:
-                type: object
-                properties:
-                  key:
-                    type: string
-                    format: binary
-                    default: <key> (application/octet-stream bytes)
-                  api-key:
-                    type: string
-                    format: binary
-                    default: <api-key> (application/octet-stream bytes)
+                type: string
+                format: binary
         '400':
           description: Invalid API key type or empty request body.
         '503':
@@ -982,10 +1105,16 @@ paths:
       tags:
       - Indexer
       summary: Register for notifcations about  these outputs in the mempool and mined transactions.
+      description: >
+        This endpoint requires that the application making the registrations currently has an active web socket connection. The registrations will last for the lifetime of the web socket and will have to be reestablished on reconnection.
+
+          The indexer will watch for spends of the outputs in new transactions and in new blocks on the indexer's preferred fork, and will post notifications on the web socket to connected applications for those outputs.
+
+          A successful registration will return any existing spend of any of the specified outputs.
       security:
         - BearerAuth: [ ]
       requestBody:
-        description: "The outpoints to look for usage of."
+        description: "The outpoints to monitor for changes."
         required: true
         content:
           application/json:
@@ -1005,16 +1134,9 @@ paths:
                 $ref: "#/components/schemas/OutputSpendResponseJSON"
             application/octet-stream:
               schema:
-                type: object
-                properties:
-                  key:
-                    type: string
-                    format: binary
-                    default: <key> (application/octet-stream bytes)
-                  api-key:
-                    type: string
-                    format: binary
-                    default: <api-key> (application/octet-stream bytes)
+                type: string
+                format: binary
+                description: The binary encoded list of spend metadata.
         '400':
           description: Invalid API key type or empty request body.
         '503':
@@ -1249,6 +1371,66 @@ components:
           type: string
         flags:
           type: integer
+    TipFilterDeletionRequestJSON:
+      type: array
+      items:
+        type: string
+        example: "5b4233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b"
+      description: >-
+        An array of pushdata hashes to remove the registrations for.
+    TipFilterDeletionRequestBinary:
+      type: array
+      items:
+        type: string
+        format: binary
+        example: 5b4233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b
+      description: >-
+        An array of pushdata hashes to remove the registrations for.
+    TipFilterRegistrationRequestJSON:
+      type: array
+      items:
+        type: array
+        items:
+          oneOf:
+            - type: string
+              example: "5b4233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b"
+            - type: integer
+              example: 300
+        description: >-
+          An array of filter entries to register. Each entry is an array containing a hex-encoded pushdata hash and a duration in seconds (must be at least 5 minutes and at most 7 days).
+    TipFilterRegistrationRequestBinary:
+      type: array
+      items:
+        type: array
+        items:
+          oneOf:
+            - type: string
+              format: binary
+              example: 5b4233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b
+            - type: string
+              format: binary
+              example: 0000012c
+        description: >-
+          An array of filter entries to register. Each entry is an array containing a 32-byte pushdata hash and a duration in seconds (must be at least 5 minutes and at most 7 days).
+    TipFilterRegistrationResponseJSON:
+      type: object
+      properties:
+        dateCreated:
+          type: integer
+    TipFilterListResponseJSON:
+      type: array
+      items:
+        type: array
+        items:
+          oneOf:
+            - type: string
+              example: "5b4233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b"
+            - type: integer
+              example: 1679949180
+            - type: integer
+              example: 5
+        description: >-
+          An array of registered filter entries. Each entry is an array containing a 32-byte pushdata hash, a date of creation and a duration in seconds.
     OutputSpendRequestJSON:
       type: array
       items:
@@ -1259,8 +1441,6 @@ components:
               example: "004233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b"
             - type: integer
               example: 5
-        minItems: 2
-        maxItems: 2
         description: >-
           The first item in the array MUST be an string representing the canonically hex-encoded transaction id,
           and the second item MUST be a integer representing the index of the transaction output.
