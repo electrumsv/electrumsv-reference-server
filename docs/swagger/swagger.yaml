@@ -959,7 +959,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RestorationResponseJSON"
+                $ref: "#/components/schemas/OutputSpendResponseJSON"
             application/octet-stream:
               schema:
                 type: object
@@ -1002,7 +1002,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RestorationResponseJSON"
+                $ref: "#/components/schemas/OutputSpendResponseJSON"
             application/octet-stream:
               schema:
                 type: object
@@ -1256,12 +1256,41 @@ components:
         items:
           oneOf:
             - type: string
+              example: "004233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b"
             - type: integer
+              example: 5
         minItems: 2
         maxItems: 2
         description: >-
           The first item in the array MUST be an string representing the canonically hex-encoded transaction id,
           and the second item MUST be a integer representing the index of the transaction output.
+    OutputSpendResponseJSON:
+      type: array
+      items:
+        type: array
+        items:
+          oneOf:
+            - type: string
+              example: "004233bd7143494258bd10779fd4a1fff8785431da75a892bb310bbc0289e45b"
+            - type: integer
+              example: 5
+            - type: string
+              example: "0120eae6dc11459fe79fbad26f998f4f8c5b75fa6f0fff5b0beca4f35ea7d721"
+            - type: integer
+              example: 0
+            - type: string
+              example: "0000000000000000021f7fa2c33c4e36f040acfeda8cc1fd1ba24581b3988da9"
+        minItems: 5
+        maxItems: 5
+        description: >-
+          The first two items in the array MUST be a string and then an integer, representing the
+          canonically hex-encoded transaction id and transaction output index of the monitored
+          outpoint. The next two items in the array MUST be a string and then an integer,
+          representing the canonically hex-encoded transaction id and transaction input index of
+          the spending input. The fifth and last item is optional and should be the canonically
+          hex-encoded block hash or null, depending if the spending transaction is currently
+          known to be in a block or in the mempool with respect to the indexer's favoured chain
+          fork.
     IndexerSettingsJSON:
       type: object
       properties:
