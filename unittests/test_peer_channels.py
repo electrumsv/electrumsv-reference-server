@@ -16,7 +16,7 @@ try:
 except ModuleNotFoundError:
     # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
-    import sqlite3  # type: ignore
+    import sqlite3
 
 import aiohttp
 from aiohttp import web, WSServerHandshakeError
@@ -405,7 +405,8 @@ class TestAiohttpRESTAPI:
         _bad_token(URL, HTTP_METHOD, headers={'Content-Type': 'application/json'})
 
         request_body = {"key": "value"}
-        self.logger.debug("test_write_message_unsupported_content_type_should_raise_400 url: %s", URL)
+        self.logger.debug("test_write_message_unsupported_content_type_should_raise_400 url: %s",
+            URL)
         headers = {'Content-Type': 'application/text'}
         result = _successful_call(URL, HTTP_METHOD, headers, request_body, CHANNEL_BEARER_TOKEN)
         assert result.status_code == HTTPStatus.BAD_REQUEST, result.reason

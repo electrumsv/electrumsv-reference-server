@@ -1,3 +1,7 @@
+mypy
+types-requests
+pylint
+pytest
 pytest-asyncio
 pytest-cov
 pytest-env

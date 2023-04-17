@@ -38,11 +38,10 @@
 from __future__ import annotations
 import os
 
-from bitcoinx import Bitcoin, Ops, P2MultiSig_Output, P2PK_Output, PrivateKey, Script, Tx, \
-    TxInput, TxOutput
+from bitcoinx import Bitcoin, Ops, P2MultiSig_Output, P2PK_Output, pack_byte, PrivateKey, Script, \
+    SigHash, Tx, TxInput, TxOutput
 
 from esv_reference_server.blockchain import verify_utxo_spend
-from esv_reference_server.payment_channels import _sign_contract_transaction_input
 
 
 PRIVATE_KEY_1 = PrivateKey.from_hex(
@@ -56,6 +55,19 @@ PUBLIC_KEY_2 = PRIVATE_KEY_2.public_key
 PRIVATE_KEY_3 = PrivateKey.from_hex(
     "efd70663ba73fbcd3926b683538304febb730d0be06741fa45d058bab8dd4906")
 PUBLIC_KEY_3 = PRIVATE_KEY_3.public_key
+
+
+def _sign_contract_transaction_input(contract_transaction: Tx, funding_output_script_bytes: bytes,
+        funding_value: int, private_key: PrivateKey, sig_hash: SigHash|None=None) -> bytes:
+    if sig_hash is None:
+        sig_hash = SigHash(SigHash.ALL | SigHash.FORKID)
+    # At this point we want to know that the signable parts of the transaction are complete and
+    # we can calculate and inject the signature of those.
+    signature_hash = contract_transaction.signature_hash(0, funding_value,
+        funding_output_script_bytes, sig_hash)
+    signature_bytes = private_key.sign(signature_hash, None)
+    sig: bytes = signature_bytes + pack_byte(sig_hash)
+    return sig
 
 
 def test_verify_utxo_spend_p2pk() -> None:
@@ -92,3 +104,4 @@ def test_verify_utxo_spend_p2ms() -> None:
     outgoing_input.script_sig = Script() << Ops.OP_0 << signature_bytes_1 << signature_bytes_2
 
     assert verify_utxo_spend(spending_tx, 0, incoming_output)
+

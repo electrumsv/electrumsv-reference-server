@@ -40,25 +40,10 @@ SAFE_DUST_VALUE = 546
 
 class AccountFlag(IntFlag):
     NONE                                    = 0
-    # Until an account has a funded payment channel it is not usable/accessible. Do not remove
-    # this flag unless
-    MID_CREATION                            = 1 << 0
 
     DISABLED_FLAGGED                        = 1 << 10
 
-    ACTIVE_MASK                             = MID_CREATION
     DISABLED_MASK                           = DISABLED_FLAGGED
-
-
-class ChannelState(IntEnum):
-    INVALID = 0
-    PAYMENT_KEY_DISPENSED = 1
-    REFUND_ESTABLISHED = 2
-    CONTRACT_OPEN = 3
-
-    CLOSED_MARKER = 100
-    CLOSED_INVALID_FUNDING_TRANSACTION = 101
-    CLOSED_BROADCASTING_FUNDING_TRANSACTION = 102
 
 
 class Network(IntEnum):

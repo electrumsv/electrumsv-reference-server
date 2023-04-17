@@ -76,11 +76,7 @@ def get_external_server_application(app_state: ApplicationState) -> web.Applicat
 
         # Payment Channel Account Management
         web.get("/api/v1/account", handlers.get_account),
-        web.post("/api/v1/account/key", handlers.post_account_key),
-        web.post("/api/v1/account/channel", handlers.post_account_channel),
-        web.put("/api/v1/account/channel", handlers.put_account_channel_update),
-        web.delete("/api/v1/account/channel", handlers.delete_account_channel),
-        web.post("/api/v1/account/funding", handlers.post_account_funding),
+        web.post("/api/v1/account/register", handlers.post_account_registration),
 
         # Message Box Management (i.e. Custom Peer Channels implementation)
         web.get("/api/v1/channel/manage/list", msg_box.controller.list_channels, allow_head=False),
