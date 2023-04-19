@@ -43,10 +43,6 @@ Peer Channel that is created).
  `/api/v1/endpoints`                                      | GET    | No     | Retrieves the metadata about the supported APIs
  `/api/v1/account`                                        | GET    | Yes    | Return account information
  `/api/v1/account/key`                                    | POST   | Special| Post keys and create an account
- `/api/v1/account/channel`                                | POST   | Yes    | Accept the initial version of the contract from the client
- `/api/v1/account/channel`                                | PUT    | Yes    | Accept a contract amendment from the client
- `/api/v1/account/channel`                                | DELETE | Yes    | Close the payment channel for the client
- `/api/v1/account/funding`                                | GET    | Yes    | Receive the funding transaction from the client
 
 ### Peer Channel API (Built-in)
 This is a Python implementation of C#/ASP.NET Core reference implementation

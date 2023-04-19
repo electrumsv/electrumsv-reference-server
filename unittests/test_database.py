@@ -129,7 +129,7 @@ def test_filtering_pushdata_hash_registration(time: unittest.mock.Mock) -> None:
         creation_rows_2[1].duration_seconds) ]
 
     # Check that pruning by expiry date works.
-    date_expires = (date_created_2 + duration_seconds)
+    date_expires = date_created_2 + duration_seconds
     assert 1 == application_state.database_context.run_in_thread(prune_indexer_filtering,
         IndexerPushdataRegistrationFlag.NONE, IndexerPushdataRegistrationFlag.NONE,
         date_expires)
@@ -299,6 +299,8 @@ async def test_outbound_data_and_logs(request_mock: unittest.mock.Mock,
     request_mock.side_effect = fake_request_error
 
     approved_sleep_event.clear()
+    # NOTE(rt12) This task logs the exception from above and has no way of knowing pytest will
+    #     spam it out during test execution. So the error logging is expected, ignore it.
     future = application_state._create_outbound_delivery_task()
     try:
         current_time = pending_rows_3[0].date_created + 120.0

@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
-    import sqlite3  # type: ignore
+    import sqlite3
 from typing import Any, cast, Optional
 from datetime import datetime, timezone
 
@@ -57,7 +57,7 @@ class MsgBoxSQLiteRepository:
     def create_message_box_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
-        sql = ("""
+        sql = """
             CREATE TABLE IF NOT EXISTS msg_box (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id    BIGINT             NOT NULL,
@@ -73,14 +73,14 @@ class MsgBoxSQLiteRepository:
                 UNIQUE (externalid),
                 FOREIGN KEY(account_id) REFERENCES accounts(account_id)
 
-            )""")
+        )"""
         db.execute(sql)
 
     def create_messages_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
 
-        sql = ("""
+        sql = """
             CREATE TABLE IF NOT EXISTS message (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 fromtoken     BIGINT             NOT NULL,
@@ -94,13 +94,13 @@ class MsgBoxSQLiteRepository:
                 UNIQUE (msg_box_id, seq),
                 FOREIGN KEY (fromtoken) REFERENCES msg_box_api_token (id),
                 FOREIGN KEY (msg_box_id) REFERENCES msg_box (id)
-            )""")
+            )"""
         db.execute(sql)
 
     def create_message_status_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
-        sql = ("""
+        sql = """
             CREATE TABLE IF NOT EXISTS message_status (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id    BIGINT             NOT NULL,
@@ -111,14 +111,14 @@ class MsgBoxSQLiteRepository:
 
                 FOREIGN KEY (message_id) REFERENCES message (id),
                 FOREIGN KEY (token_id) REFERENCES msg_box_api_token (id)
-            )""")
+        )"""
         db.execute(sql)
 
     def create_message_box_api_tokens_table(self, db: sqlite3.Connection) -> None:
         """Modelled very closely on Peer Channels reference implementation:
         https://github.com/electrumsv/spvchannels-reference"""
 
-        sql = ("""CREATE TABLE IF NOT EXISTS msg_box_api_token (
+        sql = """CREATE TABLE IF NOT EXISTS msg_box_api_token (
               id                    INTEGER PRIMARY KEY AUTOINCREMENT,
               account_id            BIGINT             NOT NULL,
               msg_box_id            BIGINT             NOT NULL,
@@ -133,8 +133,7 @@ class MsgBoxSQLiteRepository:
               UNIQUE (token),
               FOREIGN KEY (account_id) REFERENCES accounts (account_id),
               FOREIGN KEY (msg_box_id) REFERENCES msg_box (id)
-            )
-            """)
+        )"""
         db.execute(sql)
 
     def update_msg_box(self, msg_box_view_amend: MsgBoxViewModelAmend,

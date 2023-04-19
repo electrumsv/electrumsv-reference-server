@@ -30,25 +30,26 @@ try:
 except ModuleNotFoundError:
     # MacOS has latest brew version of 3.35.5 (as of 2021-06-20).
     # Windows builds use the official Python 3.10.0 builds and bundled version of 3.35.5.
-    import sqlite3  # type: ignore
+    import sqlite3
 import time
 from typing import Any, cast, NamedTuple, Optional, Sequence
 
 from electrumsv_database.sqlite import bulk_insert_returning, read_rows_by_id, \
     replace_db_context_with_connection
 
-from .constants import AccountFlag, ChannelState, IndexerPushdataRegistrationFlag, OutboundDataFlag
+from .constants import AccountFlag, IndexerPushdataRegistrationFlag, OutboundDataFlag
 from .types import AccountIndexerMetadata, OutboundDataLogRow, OutboundDataCreatedRow, \
     OutboundDataPendingRow, OutboundDataRow, TipFilterListEntry, TipFilterRegistrationEntry
 from .utils import create_account_api_token
 
-_ = """
-Useful regexes for searching codebase:
-- create.*_table -> finds all table creation functions
-"""
+# Useful regexes for searching codebase:
+# - create.*_table -> finds all table creation functions
 
 logger = logging.getLogger("app-database")
 
+
+APPLICATION_ID = int.from_bytes(b"ESVR", "big", signed=True)
+LATEST_MIGRATION = 2
 
 
 class AccountMetadata(NamedTuple):
@@ -56,39 +57,7 @@ class AccountMetadata(NamedTuple):
     public_key_bytes: bytes
     # The active API key for this client.
     api_key: str
-    # This is the account funding payment channel for this account. It is possible we may later
-    # want to have multiple payment channels for a given account, for different purposes.
-    active_channel_id: Optional[int]
     flags: AccountFlag
-    # For each payment channel the client opens with the server we increment this number.
-    last_payment_key_index: int
-
-
-class ChannelRow(NamedTuple):
-    account_id: int
-    channel_id: int
-    channel_state: ChannelState
-    # The key derivation information that tells us how to derive the payment key we gave the client.
-    payment_key_index: int
-    # The payment key we derived to give the client.
-    payment_key_bytes: bytes
-    # The hash of the funding transaction.
-    funding_transaction_hash: Optional[bytes]
-    # The funding output script from the funding transaction.
-    funding_output_script_bytes: Optional[bytes]
-    # How much the funding output value is in the funding transaction.
-    funding_value: int
-    client_payment_key_bytes: Optional[bytes]
-    contract_transaction_bytes: Optional[bytes]
-    refund_signature_bytes: Optional[bytes]
-    # This is the latest refund amount based on updates from the client.
-    refund_value: int
-    # This is incremented with every updated refund amount from the client.
-    refund_sequence: int
-    # How much they have allocated from the funding to us.
-    prepaid_balance_value: int
-    # How much of the allocated funding they have "paid" to us.
-    spent_balance_value: int
 
 
 class DatabaseStateModifiedError(Exception):
@@ -98,21 +67,48 @@ class DatabaseStateModifiedError(Exception):
 
 def setup(db: sqlite3.Connection) -> None:
     assert db is not None and isinstance(db, sqlite3.Connection)
+    initialise_database(db)
     create_tables(db)
     clear_stale_state(db)
 
 def create_tables(db: sqlite3.Connection) -> None:
     create_account_table(db)
-    create_account_payment_channel_table(db)
     create_indexer_filtering_registrations_pushdata_table(db)
     create_outbound_data_table(db)
     create_outbound_data_logs_table(db)
+
+    db.execute(f"PRAGMA user_version={LATEST_MIGRATION}")
+
+
+def initialise_database(db: sqlite3.Connection) -> None:
+    global APPLICATION_ID
+    application_id = db.execute("PRAGMA application_id").fetchone()[0]
+    if application_id == 0:
+        db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+    else:
+        assert application_id == APPLICATION_ID, "Not a recognised reference server database " \
+            f"{application_id}!={APPLICATION_ID}"
+
+    current_migration = db.execute("PRAGMA user_version").fetchone()[0]
+    assert current_migration <= LATEST_MIGRATION
+    if current_migration == 0:
+        # We do not know if this is an existing database without a version (migration 1) or a
+        # freshly created empty one (migration 0). Look if tables already exist to differentiate.
+        cursor = db.execute("SELECT name FROM sqlite_schema "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        current_migration = 0 if len(cursor.fetchall()) == 0 else 1
+
+    if current_migration == 1:
+        # Motivation: We removed the requirement that a payment channel be created as part of the
+        #     new account creation process.
+        db.execute("DROP TABLE account_payment_channels")
+        db.execute("ALTER TABLE accounts DROP COLUMN active_channel_id")
+        db.execute("ALTER TABLE accounts DROP COLUMN last_payment_key_index")
 
 def delete_all_tables(db: sqlite3.Connection) -> None:
     db.execute("DROP TABLE IF EXISTS outbound_data_logs")
     db.execute("DROP TABLE IF EXISTS outbound_data")
     db.execute("DROP TABLE IF EXISTS indexer_filtering_registrations_pushdata")
-    db.execute("DROP TABLE IF EXISTS account_payment_channels")
     db.execute("DROP TABLE IF EXISTS accounts")
 
 def clear_stale_state(db: sqlite3.Connection) -> None:
@@ -130,9 +126,6 @@ def create_account_table(db: sqlite3.Connection) -> None:
     """
         flags:                      ...
         public_key_bytes:           ...
-        active_channel_id:          ...
-        last_payment_key_index:     The derivation index of the payment key given out to the
-                                    user.
         api_key:                    The active API key for the account.
         tip_filter_callback_url:    If there is a connected indexer service behind the reference
                                     server, the user can set the url and the token for any tip
@@ -140,16 +133,11 @@ def create_account_table(db: sqlite3.Connection) -> None:
         tip_filter_callback_token:  The API key required for the reference server to post tip
                                     filter notifications to the given callback url.
     """
-    # TODO(1.4.0) Database. The `active_channel_id` should be a foreign key to the payment
-    #     channels table. However I have repressed memories about the cross-foreign keys on
-    #     both tables causing issues.
     sql = f"""
     CREATE TABLE IF NOT EXISTS accounts (
         account_id                      INTEGER     PRIMARY KEY,
-        flags                           INTEGER     DEFAULT {AccountFlag.MID_CREATION},
+        flags                           INTEGER     DEFAULT {AccountFlag.NONE},
         public_key_bytes                BINARY(32),
-        active_channel_id               INTEGER     DEFAULT NULL,
-        last_payment_key_index          INTEGER     DEFAULT 0,
         api_key                         TEXT        NOT NULL,
 
         tip_filter_callback_url         TEXT        NULL,
@@ -194,7 +182,7 @@ def get_account_id_for_api_key(db: sqlite3.Connection, api_key: str) \
     not be matched. If the account is valid, then and only then should the account id be
     returned.
     """
-    sql = "SELECT account_id, flags FROM accounts WHERE api_key=? AND flags&?=0"
+    sql = "SELECT account_id, flags FROM accounts WHERE api_key=?1 AND flags&?2=0"
     result = db.execute(sql, (api_key, AccountFlag.DISABLED_MASK)).fetchall()
     if len(result) == 0:
         return None, AccountFlag.NONE
@@ -211,7 +199,7 @@ def get_account_id_for_public_key_bytes(db: sqlite3.Connection, public_key_bytes
     that account id. An example of this is checking the DISABLED_MASK and not authorising
     the action if it is disabled.
     """
-    sql = "SELECT account_id, flags FROM accounts WHERE public_key_bytes = ?"
+    sql = "SELECT account_id, flags FROM accounts WHERE public_key_bytes = ?1"
     result = db.execute(sql, (public_key_bytes,)).fetchall()
     if len(result) == 0:
         return None, AccountFlag.NONE
@@ -222,22 +210,11 @@ def get_account_id_for_public_key_bytes(db: sqlite3.Connection, public_key_bytes
 
 @replace_db_context_with_connection
 def get_account_metadata_for_account_id(db: sqlite3.Connection, account_id: int) -> AccountMetadata:
-    sql = """
-    SELECT public_key_bytes, api_key, active_channel_id, flags, last_payment_key_index
-    FROM accounts WHERE account_id = ?
-    """
+    sql = "SELECT public_key_bytes, api_key, flags FROM accounts WHERE account_id = ?1"
     row = db.execute(sql, (account_id,)).fetchone()
     if row is None:
-        return AccountMetadata(b'', '', None, AccountFlag.NONE, 0)
+        return AccountMetadata(b'', '', AccountFlag.NONE)
     return AccountMetadata(*row)
-
-def set_account_registered(account_id: int, db: Optional[sqlite3.Connection]=None) -> None:
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = "UPDATE accounts SET flags=flags&? WHERE account_id=? AND flags&?=?"
-    cursor = db.execute(sql, (~AccountFlag.MID_CREATION, AccountFlag.MID_CREATION,
-        account_id, AccountFlag.MID_CREATION))
-    if cursor.rowcount != 1:
-        raise DatabaseStateModifiedError
 
 # SECTION: Indexer-related
 
@@ -388,168 +365,6 @@ def update_account_indexer_settings_write(account_id: int, settings: dict[str, A
         "tipFilterCallbackUrl": new_tip_filter_callback_url,
         "tipFilterCallbackToken": new_tip_filter_callback_token,
     }
-
-
-# SECTION: Account payment channels
-
-def create_account_payment_channel_table(db: sqlite3.Connection) -> None:
-    #   refund_locktime         - Used to identify when the payment channel will close.
-    sql = """
-    CREATE TABLE IF NOT EXISTS account_payment_channels (
-        channel_id                  INTEGER PRIMARY KEY,
-        account_id                  INTEGER NOT NULL,
-        channel_state               INTEGER NOT NULL,
-        payment_key_index           INTEGER NOT NULL,
-        payment_key_bytes           BINARY(32) NOT NULL,
-        funding_value               INTEGER DEFAULT 0,
-        refund_value                INTEGER DEFAULT 0,
-        refund_locktime             INTEGER DEFAULT 0,
-        refund_sequence             INTEGER DEFAULT 0,
-        funding_transaction_bytes   BLOB DEFAULT NULL,
-        funding_transaction_hash    BINARY(32) DEFAULT NULL,
-        funding_output_script_bytes BLOB DEFAULT NULL,
-        contract_transaction_bytes  BLOB DEFAULT NULL,
-        refund_signature_bytes      BLOB DEFAULT NULL,
-        client_payment_key_bytes    BINARY(32) DEFAULT NULL,
-        prepaid_balance_value       INTEGER DEFAULT 0,
-        spent_balance_value         INTEGER DEFAULT 0,
-        date_created                INTEGER NOT NULL,
-
-        FOREIGN KEY(account_id) REFERENCES accounts (account_id)
-    )
-    """
-    db.execute(sql)
-
-def create_account_payment_channel(account_id: int, payment_key_index: int,
-        payment_key_bytes: bytes, db: Optional[sqlite3.Connection]=None) -> None:
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    # It is expected the caller has already ruled out a payment channel already being in
-    # place, and that this is dealt with before creating a new one.
-    sql = """
-    SELECT active_channel_id FROM accounts WHERE account_id=?
-    """
-    rows = db.execute(sql, (account_id,)).fetchall()
-    assert len(rows) == 0 or rows[0][0] is None, rows
-
-    channel_state = ChannelState.PAYMENT_KEY_DISPENSED
-    sql = """
-    INSERT INTO account_payment_channels (account_id, channel_state, payment_key_index,
-        payment_key_bytes, date_created)
-    VALUES (?, ?, ?, ?, ?)
-    """
-    date_created = int(time.time())
-    cursor = db.execute(sql, (account_id, channel_state, payment_key_index, payment_key_bytes,
-        date_created))
-    # This should be set for INSERT and REPLACE operations.
-    assert cursor.lastrowid is not None
-    channel_id = cursor.lastrowid
-    sql = """
-    UPDATE accounts SET active_channel_id=?, last_payment_key_index=? WHERE account_id=?
-    """
-    db.execute(sql, (channel_id, payment_key_index, account_id))
-
-def delete_account_payment_channel(channel_id: int, db: Optional[sqlite3.Connection]=None) -> None:
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = "DELETE FROM account_payment_channels WHERE channel_id=? RETURNING account_id"
-    row = db.execute(sql, (channel_id,)).fetchone()
-    if row is not None:
-        account_id = row[0]
-        sql = "UPDATE accounts SET active_channel_id=NULL " \
-            "WHERE account_id=? AND active_channel_id=?"
-        db.execute(sql, (account_id, channel_id)).fetchone()
-
-@replace_db_context_with_connection
-def get_active_channel_for_account_id(db: sqlite3.Connection, account_id: int) \
-        -> Optional[ChannelRow]:
-    sql = """
-    SELECT APC.account_id, channel_id, channel_state, payment_key_index, payment_key_bytes,
-        funding_transaction_hash, funding_output_script_bytes, funding_value,
-        client_payment_key_bytes, contract_transaction_bytes, refund_signature_bytes,
-        refund_value, refund_sequence, prepaid_balance_value, spent_balance_value
-    FROM account_payment_channels APC
-    INNER JOIN accounts A ON A.active_channel_id=APC.channel_id
-    WHERE A.account_id=? AND A.active_channel_id IS NOT NULL
-    """
-    cursor = db.execute(sql, (account_id,))
-    result = cursor.fetchall()
-    if len(result) == 0:
-        return None
-    return ChannelRow(*result[0])
-
-def set_payment_channel_initial_contract_transaction(channel_id: int,
-        funding_value: int, funding_transaction_hash: bytes, refund_value: int,
-        refund_signature_bytes: bytes, contract_transaction_bytes: bytes,
-        client_payment_key_bytes: bytes, db: Optional[sqlite3.Connection]=None) -> None:
-    """
-    Raises DatabaseStateModifiedError
-    """
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = """
-    UPDATE account_payment_channels
-    SET channel_state=?, funding_value=?, funding_transaction_hash=?, refund_value=?,
-        refund_signature_bytes=?, contract_transaction_bytes=?, client_payment_key_bytes=?
-    WHERE channel_id=? AND channel_state=?
-    """
-    cursor = db.execute(sql, (ChannelState.REFUND_ESTABLISHED, funding_value,
-        funding_transaction_hash, refund_value, refund_signature_bytes,
-        contract_transaction_bytes,
-        client_payment_key_bytes, channel_id, ChannelState.PAYMENT_KEY_DISPENSED))
-    if cursor.rowcount != 1:
-        raise DatabaseStateModifiedError
-
-def update_payment_channel_contract(channel_id: int, refund_value: int,
-        refund_signature_bytes: bytes, refund_sequence: int,
-        db: Optional[sqlite3.Connection]=None) -> None:
-    """
-    Raises DatabaseStateModifiedError
-    """
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = """
-    UPDATE account_payment_channels
-    SET channel_state=?, refund_value=?, refund_signature_bytes=?, refund_sequence=?
-    WHERE channel_id=? AND channel_state=?
-    """
-    cursor = db.execute(sql, (ChannelState.REFUND_ESTABLISHED, refund_value,
-        refund_signature_bytes, refund_sequence, channel_id, ChannelState.CONTRACT_OPEN))
-    if cursor.rowcount != 1:
-        raise DatabaseStateModifiedError
-
-def set_payment_channel_funding_transaction(channel_id: int,
-        funding_transaction_bytes: bytes, funding_output_script_bytes: bytes,
-        db: Optional[sqlite3.Connection]=None) -> None:
-    """
-    Raises DatabaseStateModifiedError
-    """
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = """
-    UPDATE account_payment_channels
-    SET channel_state=?, funding_transaction_bytes=?, funding_output_script_bytes=?
-    WHERE channel_id=? AND channel_state=?
-    """
-    cursor = db.execute(sql, (ChannelState.CONTRACT_OPEN, funding_transaction_bytes,
-        funding_output_script_bytes, channel_id, ChannelState.REFUND_ESTABLISHED))
-    if cursor.rowcount != 1:
-        raise DatabaseStateModifiedError
-
-def set_payment_channel_closed(channel_id: int, channel_state: ChannelState,
-        db: Optional[sqlite3.Connection]=None) -> None:
-    """
-    Raises DatabaseStateModifiedError
-    """
-    assert db is not None and isinstance(db, sqlite3.Connection)
-    sql = """
-    UPDATE account_payment_channels SET channel_state=?
-    WHERE channel_id=? AND channel_state<?
-    """
-    cursor = db.execute(sql, (channel_state, channel_id, ChannelState.CLOSED_MARKER))
-    if cursor.rowcount != 1:
-        raise DatabaseStateModifiedError
-
-    sql = "UPDATE accounts SET active_channel_id=NULL WHERE active_channel_id=?"
-    cursor = db.execute(sql, (channel_id,))
-    if cursor.rowcount != 1:
-        raise DatabaseStateModifiedError
-
 
 # SECTION: Outbound data.
 
