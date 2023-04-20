@@ -83,17 +83,13 @@ async def post_account_registration(request: web.Request) -> web.Response:
         400 / bad request   No body with client key data or client key data badly formed.
         401 / unauthorized  The client key data failed validation.
     """
-    # TODO(nocheckin) Update the swagger for the errors, input and return value.
     if not request.body_exists:
         raise web.HTTPBadRequest()
 
     app_state: ApplicationState = request.app['app_state']
 
-    account_id: int | None = None
-    account_public_key_bytes: bytes | None = None
-
     key_data: VerifiableKeyDataDict = await request.json()
-    # TODO(nocheckin) This should expect a dated signed message.
+    # TODO(technical debt) This should expect a dated signed message.
     try:
         if not verify_key_data(key_data):
             # We do not reveal if the account exists or the key data was invalid.
