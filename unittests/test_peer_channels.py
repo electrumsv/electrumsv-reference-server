@@ -30,9 +30,8 @@ from esv_reference_server.errors import WebsocketUnauthorizedException
 from esv_reference_server import sqlite_db
 
 from .conftest import _wrong_auth_type, _bad_token, _successful_call, _no_auth, \
-    _subscribe_to_general_notifications_peer_channels, TEST_EXTERNAL_HOST, TEST_EXTERNAL_PORT, \
-    WS_URL_GENERAL
-
+    _subscribe_to_general_notifications_peer_channels, TEST_EXTERNAL_HOST, TEST_EXTERNAL_FQDN, \
+    TEST_EXTERNAL_PORT, WS_URL_GENERAL
 
 WS_URL_TEMPLATE_MSG_BOX = "ws://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
     "/api/v1/channel/{channelid}/notify"
@@ -160,7 +159,7 @@ class TestAiohttpRESTAPI:
         single_channel_data = response_body
         CHANNEL_ID = single_channel_data['id']
         assert single_channel_data['href'] == \
-            f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
+            f"http://{TEST_EXTERNAL_FQDN}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
         assert single_channel_data['public_write'] is True
         assert single_channel_data['sequenced'] is True
@@ -233,7 +232,7 @@ class TestAiohttpRESTAPI:
         assert len(response_body) == 2
         for single_channel_data in response_body:
             # assert single_channel_data['href'] == \
-            #   f"http://{TEST_HOST}:{TEST_PORT}/api/v1/channel/{CHANNEL_ID}"
+            #   f"http://{TEST_EXTERNAL_FQDN}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
             assert single_channel_data['public_read'] is True
             assert single_channel_data['public_write'] is True
             assert single_channel_data['sequenced'] is True
@@ -273,7 +272,7 @@ class TestAiohttpRESTAPI:
 
         single_channel_data = response_body
         assert single_channel_data['href'] == \
-            f"http://{TEST_EXTERNAL_HOST}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
+            f"http://{TEST_EXTERNAL_FQDN}:{TEST_EXTERNAL_PORT}/api/v1/channel/{CHANNEL_ID}"
         assert single_channel_data['public_read'] is True
         assert single_channel_data['public_write'] is True
         assert single_channel_data['sequenced'] is True

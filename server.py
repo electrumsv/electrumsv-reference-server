@@ -16,8 +16,7 @@ from esv_reference_server.application_state import ApplicationState
 from esv_reference_server.server_external import ExternalServer, get_external_server_application
 from esv_reference_server.server_internal import InternalServer, get_internal_server_application
 from esv_reference_server.constants import DEFAULT_DATABASE_NAME, EXTERNAL_SERVER_HOST, \
-    EXTERNAL_SERVER_PORT, INTERNAL_SERVER_HOST, INTERNAL_SERVER_PORT, Network
-
+    EXTERNAL_FQDN, EXTERNAL_SERVER_PORT, INTERNAL_SERVER_HOST, INTERNAL_SERVER_PORT, Network
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 LOG_PATH = Path('logs') / 'esv_reference_server.log'
@@ -102,6 +101,7 @@ def setup_application() -> tuple[Network, Path]:
 
 
 async def main() -> None:
+    which_network, datastore_location = setup_application()
     external_host = cast(str, os.getenv("EXTERNAL_HOST", EXTERNAL_SERVER_HOST))
     external_port_text = os.getenv("EXTERNAL_PORT", EXTERNAL_SERVER_PORT)
     try:
@@ -109,6 +109,7 @@ async def main() -> None:
     except ValueError:
         print(f"Invalid `EXTERNAL_PORT` value '{external_port_text}'")
         sys.exit(1)
+    external_fqdn = cast(str, os.getenv("EXTERNAL_FQDN", EXTERNAL_FQDN))
 
     internal_host = cast(str, os.getenv("INTERNAL_HOST", INTERNAL_SERVER_HOST))
     internal_port_text = os.getenv("INTERNAL_PORT", INTERNAL_SERVER_PORT)
@@ -118,9 +119,8 @@ async def main() -> None:
         print(f"Invalid `INTERNAL_PORT` value '{internal_port_text}'")
         sys.exit(1)
 
-    which_network, datastore_location = setup_application()
     application_state = ApplicationState(which_network, datastore_location, internal_host,
-        internal_port, external_host, external_port)
+        internal_port, external_host, external_port, external_fqdn)
 
     use_internal_server = os.getenv("EXPOSE_INDEXER_APIS") == "1"
     internal_application: Optional[web.Application] = None
@@ -139,6 +139,7 @@ async def main() -> None:
             internal_port)
         run_internal_server_task = asyncio.create_task(internal_server.run_async())
         tasks.append(run_internal_server_task)
+
     external_server = ExternalServer(external_application, application_state, external_host,
         external_port)
     run_external_server_task = asyncio.create_task(external_server.run_async())
