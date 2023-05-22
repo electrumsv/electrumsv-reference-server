@@ -78,7 +78,7 @@ def _auth_for_channel_token(request: web.Request,
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
     app_state: ApplicationState = request.app['app_state']
-    href = f"http://{app_state.external_host}:{app_state.external_port}"+ \
+    href = f"http://{app_state.external_fqdn}:{app_state.external_port}"+ \
         f"/api/v1/channel/{msg_box.external_id}"
     return MsgBoxViewModelGet.from_msg_box(msg_box, href=href)
 
