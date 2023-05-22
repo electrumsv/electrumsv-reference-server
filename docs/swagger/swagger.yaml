@@ -65,44 +65,47 @@ paths:
   /api/v1/account:
     get:
       summary: Get account details
-      description: Return account information
+      description: This currently serves as a way for an account owner to determine if they have
+        an account with the service, and what the API key is. The client can provide the same request
+        body used in the registration endpoint and either get an unauthorized response if there is
+        no account (or it is disabled) or if there is an account their API key data.
       security:
         - BearerAuth: [ ]
       tags:
-        - Account Management and Authorization - Opens a micropayment channel
+        - Account Management and Authorization
       responses:
         '200':
           description: Success
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  public_key_hex:
-                    type: string
-                  api_key:
-                    type: string
+                $ref: "#/components/schemas/APIKeyResponse"
         '400':
           description: Invalid API key type or no body with client key data.
         '401':
           description: Unauthorized - An API key was provided and it was invalid
 
-  /api/v1/account/key:
+  /api/v1/account/register:
     post:
-      summary: Post keys and create an account
+      summary: Create an account for the given identity public key.
       security:
         - BearerAuth: [ ]
       description: |
-        Start the payment channel funding process by generating a payment key for the given client.
-        If the client does not have an account this is part of the process of creating their account.
-        If the client does have an account they must not have an active payment channel.
-
-        There is no asynchronicity within this handler so it should be safe from any race conditions
-        by any client submitting multiple requests to it..
+        Attempt to create a new account for the given identity public key. If the account alread
+        exists this will return the current API key for that account. If it does not, then a new account
+        will be created and the API key for it returned.
       tags:
-        - Account Management and Authorization - Opens a micropayment channel
+        - Account Management and Authorization
       requestBody:
-        description: Optional description in *Markdown*
+        description: |
+          This is both the identity public key of the client and a signed message with that key, intended
+          to prove that the client is the owner of the matching private key. The signed message should
+          be the full URL of this endpoint (using the external domain name) combined with the current UTC
+          date, for instance "https://x.bitcoinsv.io/api/v1/account/register 2023-04-20T23:41:53.708982".
+          We do not currently check these values are correct, but will do so in future. They are intended
+          to ensure that access to an account cannot be gained by replaying the request body. For regtest
+          this the domain name will most commonly be the localhost IP address and port the local reference
+          server instance is running on.
         required: true
         content:
           application/json:
@@ -119,25 +122,14 @@ paths:
         '200':
           description: Success
           content:
-            multipart/mixed:
+            application/json:
               schema:
-                type: object
-                properties:
-                  key:
-                    type: string
-                    format: binary
-                    default: <key> (application/octet-stream bytes)
-                  api-key:
-                    type: string
-                    format: binary
-                    default: <api-key> (application/octet-stream bytes)
+                $ref: "#/components/schemas/APIKeyResponse"
         '400':
           description: Invalid API key type or no body with client key data.
         '401':
           description: Unauthorized - An API key was provided and it was invalid or the client key data was
             not valid.
-        '409':
-          description: Conflict - There is an existing active payment channel
 
   # General Websocket
   /api/v1/web-socket:
@@ -1098,6 +1090,13 @@ components:
           type: boolean
         can_write:
           type: boolean
+    APIKeyResponse:
+      type: object
+      properties:
+        public_key_hex:
+          type: string
+        api_key:
+          type: string
     Channels:
       type: object
       properties:
