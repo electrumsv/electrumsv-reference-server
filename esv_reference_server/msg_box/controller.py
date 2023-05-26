@@ -78,8 +78,13 @@ def _auth_for_channel_token(request: web.Request,
 
 def _msg_box_get_view(request: web.Request, msg_box: MsgBox) -> MsgBoxViewModelGet:
     app_state: ApplicationState = request.app['app_state']
-    href = f"http://{app_state.external_fqdn}:{app_state.external_port}"+ \
-        f"/api/v1/channel/{msg_box.external_id}"
+    if app_state.href_port == 80:
+        href = f"http://{app_state.href_host}/api/v1/channel/{msg_box.external_id}"
+    elif app_state.href_port == 443:
+        href = f"https://{app_state.href_host}/api/v1/channel/{msg_box.external_id}"
+    else:
+        href = f"http://{app_state.href_host}:{app_state.href_port}/api/v1/channel/" \
+               f"{msg_box.external_id}"
     return MsgBoxViewModelGet.from_msg_box(msg_box, href=href)
 
 

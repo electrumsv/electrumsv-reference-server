@@ -10,7 +10,8 @@ from bitcoinx import PrivateKey, sha256
 
 EXTERNAL_SERVER_HOST = "127.0.0.1"
 EXTERNAL_SERVER_PORT = 47124
-EXTERNAL_FQDN = "127.0.0.1"  # x.bitcoinx.io for example on mainnet
+HREF_HOST = "127.0.0.1"  # x.bitcoinx.io for example on mainnet
+HREF_PORT = 47124
 INTERNAL_SERVER_HOST = "127.0.0.1"
 INTERNAL_SERVER_PORT = 47126
 
