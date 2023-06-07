@@ -16,7 +16,7 @@ from esv_reference_server.application_state import ApplicationState
 from esv_reference_server.server_external import ExternalServer, get_external_server_application
 from esv_reference_server.server_internal import InternalServer, get_internal_server_application
 from esv_reference_server.constants import DEFAULT_DATABASE_NAME, EXTERNAL_SERVER_HOST, \
-    EXTERNAL_FQDN, EXTERNAL_SERVER_PORT, INTERNAL_SERVER_HOST, INTERNAL_SERVER_PORT, Network
+    EXTERNAL_SERVER_PORT, HREF_HOST, HREF_PORT, INTERNAL_SERVER_HOST, INTERNAL_SERVER_PORT, Network
 
 MODULE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 LOG_PATH = Path('logs') / 'esv_reference_server.log'
@@ -109,7 +109,8 @@ async def main() -> None:
     except ValueError:
         print(f"Invalid `EXTERNAL_PORT` value '{external_port_text}'")
         sys.exit(1)
-    external_fqdn = cast(str, os.getenv("EXTERNAL_FQDN", EXTERNAL_FQDN))
+    href_host = cast(str, os.getenv("HREF_HOST", HREF_HOST))
+    href_port = int(os.getenv("HREF_PORT", HREF_PORT))
 
     internal_host = cast(str, os.getenv("INTERNAL_HOST", INTERNAL_SERVER_HOST))
     internal_port_text = os.getenv("INTERNAL_PORT", INTERNAL_SERVER_PORT)
@@ -120,7 +121,7 @@ async def main() -> None:
         sys.exit(1)
 
     application_state = ApplicationState(which_network, datastore_location, internal_host,
-        internal_port, external_host, external_port, external_fqdn)
+        internal_port, external_host, external_port, href_host, href_port)
 
     use_internal_server = os.getenv("EXPOSE_INDEXER_APIS") == "1"
     internal_application: Optional[web.Application] = None

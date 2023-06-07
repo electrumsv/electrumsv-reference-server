@@ -64,7 +64,8 @@ class ApplicationState(object):
     singleton_event = threading.Event()
 
     def __init__(self, network: Network, datastore_location: Path, internal_host: str,
-            internal_port: int, external_host: str, external_port: int, external_fqdn: str) -> None:
+            internal_port: int, external_host: str, external_port: int, href_host: str,
+            href_port: int) -> None:
         self.logger = logging.getLogger('app-state')
 
         assert ApplicationState.singleton_reference is None
@@ -77,7 +78,8 @@ class ApplicationState(object):
         self.internal_port = internal_port
         self.external_host = external_host
         self.external_port = external_port
-        self.external_fqdn = external_fqdn
+        self.href_host = href_host
+        self.href_port = href_port
         self.network = network
 
         if network == network.REGTEST:

@@ -39,7 +39,8 @@ logger = logging.getLogger("unittest")
 
 TEST_EXTERNAL_HOST = "127.0.0.1"
 TEST_EXTERNAL_PORT = 55666
-TEST_EXTERNAL_FQDN = "127.0.0.1"
+TEST_HREF_HOST = "127.0.0.1"
+TEST_HREF_PORT = 55666
 TEST_INTERNAL_HOST = "127.0.0.1"
 TEST_INTERNAL_PORT = 55668
 
@@ -228,6 +229,8 @@ def run_server() -> Generator[ApplicationState, None, None]:
     os.environ['EXTERNAL_PORT'] = str(TEST_EXTERNAL_PORT)
     os.environ['INTERNAL_HOST'] = TEST_INTERNAL_HOST
     os.environ['INTERNAL_PORT'] = str(TEST_INTERNAL_PORT)
+    os.environ['HREF_HOST'] = TEST_HREF_HOST
+    os.environ['HREF_PORT'] = str(TEST_HREF_PORT)
     os.environ['NETWORK'] = "regtest"
     os.environ['EXPOSE_HEADER_SV_APIS'] = '1'
     os.environ['HEADER_SV_URL'] = 'http://127.0.0.1:33444'
