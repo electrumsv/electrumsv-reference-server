@@ -2,19 +2,10 @@
 # Distributed under the Open BSV software license, see the accompanying file LICENSE
 
 from __future__ import annotations
-
-import asyncio
+import asyncio, logging, os, struct, threading, time, weakref
 from collections import defaultdict
 from http import HTTPStatus
-import json
-import logging
-import os
 from pathlib import Path
-import struct
-import threading
-import time
-from typing import Optional
-import weakref
 
 import aiohttp
 from aiohttp import web
@@ -35,8 +26,8 @@ from .keys import create_regtest_server_keys, ServerKeys, get_server_keys
 from .msg_box.repositories import MsgBoxSQLiteRepository
 from . import sqlite_db
 from .types import AccountMessage, AccountWebsocketState, GeneralNotification, \
-    HeadersWSClient, MsgBoxWSClient, OutboundDataLogRow, OutboundDataPendingRow, Outpoint, \
-    PushNotification
+    HeadersWSClient, MsgBoxWSClient, NotificationJsonData, OutboundDataLogRow, \
+    OutboundDataPendingRow, Outpoint
 from .utils import pack_account_message_bytes
 
 
@@ -58,9 +49,9 @@ class ApplicationState(object):
     # This application should always be present.
     external_application: web.Application
     # This application may be present if there is need for it.
-    internal_application: Optional[web.Application] = None
+    internal_application: web.Application|None = None
 
-    singleton_reference: Optional[weakref.ReferenceType[ApplicationState]] = None
+    singleton_reference: weakref.ReferenceType[ApplicationState]|None = None
     singleton_event = threading.Event()
 
     def __init__(self, network: Network, datastore_location: Path, internal_host: str,
@@ -96,11 +87,12 @@ class ApplicationState(object):
         self.headers_ws_clients_lock: threading.RLock = threading.RLock()
 
         self.msg_box_ws_clients: dict[str, MsgBoxWSClient] = {}
-        self.msg_box_ws_clients_map: dict[int, set[str]] = {}  # msg_box_id: ws_ids
+        self.ws_clients_by_messagebox_id: dict[int, set[str]] = {}  # msg_box_id: ws_ids
         self.msg_box_ws_clients_lock: threading.RLock = threading.RLock()
-        self.msg_box_new_msg_queue: asyncio.Queue[tuple[int, PushNotification]] = asyncio.Queue()
+        self.msgbox_notification_queue: asyncio.Queue[tuple[int, NotificationJsonData]] \
+            = asyncio.Queue()
 
-        def _setup_database(db: Optional[sqlite3.Connection]=None) -> None:
+        def _setup_database(db: sqlite3.Connection|None=None) -> None:
             if int(os.getenv('REFERENCE_SERVER_RESET', "0")):
                 self.logger.info("Dropping database tables")
                 self.msg_box_repository.drop_tables(db)
@@ -115,18 +107,18 @@ class ApplicationState(object):
 
         self.header_sv_url = os.getenv('HEADER_SV_URL')
 
-        self._account_notifications_task: Optional[asyncio.Task[None]] = None
-        self._message_box_notifications_task: Optional[asyncio.Task[None]] = None
-        self._header_notifications_task: Optional[asyncio.Task[None]] = None
-        self._outbound_data_delivery_future: Optional[asyncio.Future[None]] = None
+        self._account_notifications_task: asyncio.Task[None]|None = None
+        self._message_box_notifications_task: asyncio.Task[None]|None = None
+        self._header_notifications_task: asyncio.Task[None]|None = None
+        self._outbound_data_delivery_future: asyncio.Future[None]|None = None
 
         # Indexer-related state.
-        self._indexer_task: Optional[asyncio.Task[None]] = None
+        self._indexer_task: asyncio.Task[None]|None = None
         self.indexer_url = os.getenv('INDEXER_URL')
         self.indexer_is_connected = False
         self._output_spend_counts: dict[Outpoint, int] = defaultdict(int)
 
-    async def setup_async(self, internal_application: Optional[web.Application],
+    async def setup_async(self, internal_application: web.Application|None,
             external_application: web.Application) -> None:
         self.internal_application = internal_application
         self.external_application = external_application
@@ -371,82 +363,50 @@ class ApplicationState(object):
         with self.msg_box_ws_clients_lock:
             return self.msg_box_ws_clients
 
-    def get_msg_box_ws_clients_by_channel_id(self, msg_box_internal_id: int) \
-            -> list[MsgBoxWSClient]:
+    def get_ws_clients_by_messagebox_id(self, messagebox_id: int) -> list[MsgBoxWSClient]:
         with self.msg_box_ws_clients_lock:
-            if msg_box_internal_id not in self.msg_box_ws_clients_map:
-                return []
-
-            ws_ids = self.msg_box_ws_clients_map[msg_box_internal_id]
-            ws_clients = []
-            for ws_id in ws_ids:
-                ws_clients.append(self.msg_box_ws_clients[ws_id])
-            return ws_clients
+            return [ self.msg_box_ws_clients[ws_id]
+                for ws_id in self.ws_clients_by_messagebox_id.get(messagebox_id, []) ]
 
     def add_msg_box_ws_client(self, ws_client: MsgBoxWSClient) -> None:
         """Creates a two-way mapping for fast lookups"""
         with self.msg_box_ws_clients_lock:
             self.msg_box_ws_clients[ws_client.ws_id] = ws_client
-            if self.msg_box_ws_clients_map.get(ws_client.msg_box_internal_id) is None:
-                self.msg_box_ws_clients_map[ws_client.msg_box_internal_id] = set()
-            self.msg_box_ws_clients_map[ws_client.msg_box_internal_id].add(ws_client.ws_id)
+            if self.ws_clients_by_messagebox_id.get(ws_client.messagebox_id) is None:
+                self.ws_clients_by_messagebox_id[ws_client.messagebox_id] = set()
+            self.ws_clients_by_messagebox_id[ws_client.messagebox_id].add(ws_client.ws_id)
 
     def remove_msg_box_ws_client(self, ws_id: str) -> None:
         with self.msg_box_ws_clients_lock:
-            msg_box_internal_id = self.msg_box_ws_clients[ws_id].msg_box_internal_id
+            msg_box_internal_id = self.msg_box_ws_clients[ws_id].messagebox_id
             del self.msg_box_ws_clients[ws_id]
-            self.msg_box_ws_clients_map[msg_box_internal_id].remove(ws_id)
-            if len(self.msg_box_ws_clients_map[msg_box_internal_id]) == 0:
-                del self.msg_box_ws_clients_map[msg_box_internal_id]
+            self.ws_clients_by_messagebox_id[msg_box_internal_id].remove(ws_id)
+            if len(self.ws_clients_by_messagebox_id[msg_box_internal_id]) == 0:
+                del self.ws_clients_by_messagebox_id[msg_box_internal_id]
 
     async def _manage_message_box_notifications_async(self) -> None:
         """Emits any notifications from the queue to all connected websockets"""
         try:
-            notification: PushNotification
-            ws_client: MsgBoxWSClient
             while not self._exit_event.is_set():
-                try:
-                    msg_box_api_token_id, notification = await self.msg_box_new_msg_queue.get()
-                except Exception:
-                    logger.exception("Unexpected exception in peer channel notification task")
-                    continue
-
-                msg_box = notification['msg_box']
-
-                if len(self.get_msg_box_ws_clients()) == 0:
-                    self.logger.debug("Skipped web socket notifications for peer channel id=%d",
-                        msg_box.id)
-                    continue
-
-                self.logger.debug("Broadcasting web socket notifications for peer channel "
-                    "id: %d", msg_box.id)
-
-                # Send new message notifications to the relevant (and authenticated)
-                # websocket client (based on msg_box_id)
-                # Todo - key: value cache to lookup the relevant client
-                ws_clients = self.get_msg_box_ws_clients_by_channel_id(msg_box.id)
-                for ws_client in ws_clients:
-                    self.logger.debug("Sending peer channel notification to ws_id: %s",
-                        ws_client.ws_id)
-                    if ws_client.msg_box_internal_id == notification['msg_box'].id:
-                        try:
-                            msg = json.dumps(notification['notification'])
-                            await ws_client.websocket.send_str(data=msg)
-                        except ConnectionResetError as e:
-                            self.logger.error("Websocket disconnected")
-
+                msgbox_id, notification_data = await self.msgbox_notification_queue.get()
+                clients = self.get_ws_clients_by_messagebox_id(msgbox_id)
+                self.logger.debug("msgbox[%d] %d notifications", msgbox_id, len(clients))
+                for client in clients:
+                    try:
+                        await client.websocket.send_json(notification_data)
+                    except ConnectionResetError:
+                        self.logger.error("Websocket[%s] disconnected", client.ws_id)
         except Exception:
-            self.logger.exception("unexpected exception in message_box_notifications_task")
+            self.logger.exception("Unexpected exception")
         finally:
-            self.logger.info("Closing peer channel push notifications thread")
+            self.logger.info("Exiting msgbox notifications task")
 
     # General Websocket Client Get/Add/Remove & Notify thread
     def get_account_websockets(self) -> dict[str, AccountWebsocketState]:
         with self._account_websocket_state_lock:
             return self._account_websocket_state
 
-    def get_websocket_state_for_account_id(self, account_id: int) \
-            -> Optional[AccountWebsocketState]:
+    def get_websocket_state_for_account_id(self, account_id: int) -> AccountWebsocketState|None:
         with self._account_websocket_state_lock:
             websocket_id = self._account_websocket_id_by_account_id.get(account_id)
             if websocket_id:
@@ -499,32 +459,23 @@ class ApplicationState(object):
 
                 websocket_state = self.get_websocket_state_for_account_id(account_id)
                 if websocket_state is None:
-                    self.logger.debug(
-                        "No websocket, dropped message, message_kind=%s, account_id=%d",
-                        message_kind, account_id)
+                    self.logger.debug("No websocket, dropped message, message_kind=%s, "
+                        "account_id=%d", message_kind, account_id)
                     continue
 
-                if websocket_state.accept_type == "application/json":
-                    message_kind_name = ACCOUNT_MESSAGE_NAMES[message_kind]
-                    # TODO(1.4.0) JSON support. We might consider unpacking this for JSON into
-                    #     some dictionary structure rather than just giving them the hex.
-                    if isinstance(payload, bytes): # spent output notification
-                        payload = payload.hex()
-                    json_object = GeneralNotification(message_type=message_kind_name,
-                        result=payload)
-                    try:
-                        await websocket_state.websocket.send_str(data=json.dumps(json_object))
-                    except ConnectionResetError:
-                        self.logger.debug(
-                            "Dropped message for disconnected text websocket, message_kind=%s, "
-                            "account_id=%d", message_kind, account_id)
-                else:
-                    message_bytes = pack_account_message_bytes(message_kind, payload)
-                    try:
-                        await websocket_state.websocket.send_bytes(data=message_bytes)
-                    except ConnectionResetError:
-                        self.logger.debug(
-                            "Dropped message for disconnected binary websocket, message_kind=%s, "
-                            "account_id=%d", message_kind, account_id)
+                try:
+                    if websocket_state.accept_type == "application/json":
+                        # TODO(1.4.0) JSON support. We might consider unpacking this for JSON into
+                        #     some dictionary structure rather than just giving them the hex.
+                        if isinstance(payload, bytes): # spent output notification
+                            payload = payload.hex()
+                        await websocket_state.websocket.send_json(GeneralNotification(
+                            message_type=ACCOUNT_MESSAGE_NAMES[message_kind], result=payload))
+                    else:
+                        await websocket_state.websocket.send_bytes(
+                            pack_account_message_bytes(message_kind, payload))
+                except ConnectionResetError:
+                    self.logger.debug("Dropped message for disconnected websocket, "
+                        "message_kind=%s, account_id=%d", message_kind, account_id)
         finally:
             self.logger.info("Exiting account push notifications thread")

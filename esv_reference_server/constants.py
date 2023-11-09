@@ -83,3 +83,11 @@ class OutboundDataFlag(IntFlag):
     DISPATCH_NO_CALLBACK                    = 1 << 18
     DISPATCH_EXCEPTION                      = 1 << 19
     DISPATCHED_SUCCESSFULLY                 = 1 << 20
+
+
+class MessageBoxTokenFlag(IntFlag):
+    NONE                            = 0
+
+    READ_ACCESS                     = 1 << 0
+    WRITE_ACCESS                    = 1 << 1
+    OWNED_BY_ACCOUNT                = 1 << 2

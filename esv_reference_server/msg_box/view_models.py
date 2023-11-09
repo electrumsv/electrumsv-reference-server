@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TypedDict, Dict, Union, cast, List
 
-from esv_reference_server.msg_box.models import MsgBox
+from ..constants import MessageBoxTokenFlag
+from .models import MsgBox
 
 
 class RetentionViewModelJSON(TypedDict):
@@ -97,9 +98,9 @@ class MsgBoxViewModelGet:
             MsgBoxAPITokenViewModelGet(
                 api_token.id,
                 api_token.token,
-                api_token.description if api_token.description else "Owner",
-                bool(api_token.can_read),
-                bool(api_token.can_write)
+                api_token.description if api_token.description else "",
+                api_token.flags & MessageBoxTokenFlag.READ_ACCESS != 0,
+                api_token.flags & MessageBoxTokenFlag.WRITE_ACCESS != 0
             )
             for api_token in msg_box.api_tokens
         ]
@@ -108,13 +109,6 @@ class MsgBoxViewModelGet:
             public_write=bool(msg_box.public_write), sequenced=bool(msg_box.sequenced),
             locked=bool(msg_box.locked), head_sequence=msg_box.head_message_sequence,
             retention=retention, access_tokens=api_tokens)
-
-
-@dataclass()
-class APITokenViewModelCreate:
-    description: str
-    can_read: bool
-    can_write: bool
 
 
 class APITokenViewModelGetJSON(TypedDict):

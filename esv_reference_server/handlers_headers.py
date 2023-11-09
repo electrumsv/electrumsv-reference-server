@@ -50,8 +50,8 @@ async def get_header(request: web.Request) -> web.Response:
             result = await response.json()
         response_headers = {'User-Agent': 'ESV-Ref-Server'}
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
-    except aiohttp.ClientConnectorError as e:
-        logger.error("HeaderSV service is unavailable on %s", app_state.header_sv_url)
+    except aiohttp.ClientConnectorError:
+        logger.error("Unavailable HeaderSV service request %s", request.rel_url.path)
         raise web.HTTPServiceUnavailable()
 
 
@@ -84,8 +84,8 @@ async def get_headers_by_height(request: web.Request) -> web.Response:
             result = await response.json()
         response_headers = {'User-Agent': 'ESV-Ref-Server'}
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
-    except aiohttp.ClientConnectorError as e:
-        logger.error("HeaderSV service is unavailable on %s", app_state.header_sv_url)
+    except aiohttp.ClientConnectorError:
+        logger.error("Unavailable HeaderSV service request %s", request.rel_url.path)
         raise web.HTTPServiceUnavailable()
 
 
@@ -134,8 +134,8 @@ async def get_chain_tips(request: web.Request) -> web.Response:
                 headers=response_headers, content_type=accept_type)
         return web.json_response(result, status=200, reason='OK', headers=response_headers)
 
-    except aiohttp.ClientConnectorError as e:
-        logger.error("HeaderSV service is unavailable on %s", app_state.header_sv_url)
+    except aiohttp.ClientConnectorError:
+        logger.error("Unavailable HeaderSV service request %s", request.rel_url.path)
         raise web.HTTPServiceUnavailable()
 
 

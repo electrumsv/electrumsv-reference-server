@@ -20,17 +20,16 @@ import aiohttp
 from aiohttp import web
 from aiohttp.web_ws import WebSocketResponse
 
-from ..constants import AccountMessageKind
+from ..constants import AccountMessageKind, MessageBoxTokenFlag
 from ..errors import APIErrors
 from .. import sqlite_db
-from ..types import AccountMessage, ChannelNotification, MsgBoxWSClient, \
-    PushNotification
+from ..types import AccountMessage, MsgBoxWSClient, NotificationJsonData
 from ..utils import _try_read_bearer_token
 
-from .models import Message, MsgBox, MsgBoxAPIToken
+from .models import Message, MsgBox, MsgBoxAPITokenRow
 from .repositories import MsgBoxSQLiteRepository, PeerChannelMessageWriteError
 from .types import MessageTextResponse
-from .view_models import APITokenViewModelCreate, MsgBoxViewModelGet, \
+from .view_models import MsgBoxViewModelGet, \
     MsgBoxViewModelCreate, MsgBoxViewModelAmend, RetentionViewModel
 
 if TYPE_CHECKING:
@@ -42,21 +41,21 @@ logger = logging.getLogger('handlers-peer-channels')
 
 def _auth_for_channel_token(request: web.Request,
         handler_name: str, token: str, external_id: str,
-        msg_box_repository: MsgBoxSQLiteRepository) -> tuple[int, MsgBoxAPIToken]:
+        msg_box_repository: MsgBoxSQLiteRepository) -> tuple[int, MsgBoxAPITokenRow]:
     token_row = msg_box_repository.get_api_token(token)
     if token_row is None:
         raise web.HTTPUnauthorized()
 
-    if token_row.valid_to and datetime.now(tz=timezone.utc) > token_row.valid_to:
-        assert token_row.valid_to.tzinfo == timezone.utc
+    if token_row.validto and time.time() > token_row.validto:
         raise web.HTTPUnauthorized(reason=f"{APIErrors.PEER_CHANNEL_TOKEN_EXPIRED}: "
                                           "Peer channel token expired.")
 
+    have_read_access = token_row.flags & MessageBoxTokenFlag.READ_ACCESS != 0
+    have_write_access = token_row.flags & MessageBoxTokenFlag.WRITE_ACCESS != 0
     if (request.method.lower() == 'post'
-            and (handler_name == 'mark_message_read_or_unread' and not token_row.can_read or
-                 handler_name != 'mark_message_read_or_unread' and not token_row.can_write)
-            or ((request.method.lower() == 'get' or request.method.lower() == 'head')
-                and not token_row.can_read)):
+            and (handler_name == 'mark_message_read_or_unread' and not have_read_access or
+                 handler_name != 'mark_message_read_or_unread' and not have_write_access)
+        or (request.method.lower() in ('get', 'head') and not have_read_access)):
 
         # NOTE: Divergence from original reference implementation occurs here.
         #   This clause was removed:
@@ -327,14 +326,28 @@ async def create_new_token_for_channel(request: web.Request) -> web.Response:
     if msg_box is None:
         raise web.HTTPNotFound
 
+    flags = MessageBoxTokenFlag.NONE
     try:
         body = await request.json()
-    except JSONDecodeError as e:
+    except JSONDecodeError:
         logger.exception("failed getting json from request")
         raise web.HTTPBadRequest(reason="bad request body, invalid JSON")
 
-    api_token_view_model_create = APITokenViewModelCreate(**body)
-    api_token_view_model_get = msg_box_repository.create_api_token(api_token_view_model_create,
+    if type(body) is not dict:
+        raise web.HTTPBadRequest(reason="bad request body, not a JSON object")
+    for key_name in ("description", "can_read", "can_write"):
+        if key_name not in body:
+            raise web.HTTPBadRequest(reason=f"bad request body, invalid '{key_name}' field")
+
+    description = body["description"]
+    if type(description) is not str:
+        raise web.HTTPBadRequest(reason="bad request body, invalid description")
+    if bool(body["can_read"]):
+        flags |= MessageBoxTokenFlag.READ_ACCESS
+    if bool(body["can_write"]):
+        flags |= MessageBoxTokenFlag.WRITE_ACCESS
+
+    api_token_view_model_get = msg_box_repository.create_api_token(description, flags,
         msg_box.id, account_id)
     if api_token_view_model_get is None:
         raise web.HTTPNotFound()
@@ -366,8 +379,8 @@ async def write_message(request: web.Request) -> web.Response:
         # given message box represented by `external_id`.
         internal_message_box_id, api_token_row =_auth_for_channel_token(request,
             'write_message', api_key, external_id, msg_box_repository)
-        message_box_row = msg_box_repository.get_message_box_by_id(internal_message_box_id)
-        assert message_box_row is not None
+        messagebox_row = msg_box_repository.get_message_box_by_id(internal_message_box_id)
+        assert messagebox_row is not None
     # else:
     #     msg_box = msg_box_repository.get_msg_box(account_id, external_id)
     #     if msg_box is None:
@@ -400,7 +413,7 @@ async def write_message(request: web.Request) -> web.Response:
 
     # Write message to database
     message = Message(
-        msg_box_id=message_box_row.id,
+        msg_box_id=messagebox_row.id,
         msg_box_api_token_id=api_token_row.id,
         content_type=request.content_type,
         payload=payload_bytes,
@@ -426,21 +439,22 @@ async def write_message(request: web.Request) -> web.Response:
     logger.info("Message %s from api_token_id: %s written to channel %s", message_row.message_id,
         api_token_row.id, external_id)
 
-    # Send push notification
-    notification_new_message_text = os.getenv('NOTIFICATION_TEXT_NEW_MESSAGE',
-                                              'New message arrived')
-    notification = PushNotification(
-        msg_box=message_box_row,
-        notification=notification_new_message_text,
-    )
-    # Per-Channel reference API
-    app_state.msg_box_new_msg_queue.put_nowait((api_token_row.id, notification))
+    # Send push notification. This goes out to all websockets for all api tokens.
+    # TODO(technical-debt) Do not send to the holder of the token who sent the message.
+    payload_json = NotificationJsonData(
+        sequence=message_row.sequence,
+        received=datetime.fromtimestamp(message_row.date_received, tz=timezone.utc)
+            .isoformat().replace("+00:00", "Z"),
+        content_type=message_row.content_type,
+        channel_id=messagebox_row.external_id)
+    app_state.msgbox_notification_queue.put_nowait((messagebox_row.id, payload_json))
 
-    # General-Purpose websocket
-    channel_msg = ChannelNotification(id=message_box_row.external_id,
-        notification=notification['notification'])
-    app_state.account_message_queue.put_nowait(AccountMessage(message_box_row.account_id,
-        AccountMessageKind.PEER_CHANNEL_MESSAGE, channel_msg))
+    # Websocket of the account who owns the message box. We do not send the notification to them
+    # if they are the sender. This differs from the per-message-box web socket although that
+    # should possibly match this behaviour.
+    if api_token_row.flags & MessageBoxTokenFlag.OWNED_BY_ACCOUNT == 0:
+        app_state.account_message_queue.put_nowait(AccountMessage(messagebox_row.account_id,
+            AccountMessageKind.PEER_CHANNEL_MESSAGE, payload_json))
 
     message_text = base64.b64encode(message_row.payload_bytes).decode()
     message_text_response: MessageTextResponse = {
@@ -672,7 +686,7 @@ class MsgBoxWebSocket(web.View):
         await ws.prepare(self.request)
         client = MsgBoxWSClient(
             ws_id=ws_id, websocket=ws,
-            msg_box_internal_id=internal_message_box_id,
+            messagebox_id=internal_message_box_id,
         )
         app_state.add_msg_box_ws_client(client)
         self.logger.debug('%s connected. host=%s. channel_id=%s',

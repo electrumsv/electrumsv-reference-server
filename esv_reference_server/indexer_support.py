@@ -11,8 +11,7 @@
 #
 
 from __future__ import annotations
-import asyncio
-import logging
+import asyncio, logging
 from typing import cast, TYPE_CHECKING
 
 import aiohttp
@@ -75,55 +74,71 @@ async def maintain_indexer_connection_async(application_state: ApplicationState)
 
     logger.debug("Entering maintain_indexer_connection")
     try:
+        message_to_ignore: str | None = None
         while not application_state._exit_event.is_set():
-            await manage_indexer_websocket(application_state, client_session, websocket_url)
-            logger.debug("Not connected to indexer; waiting for 10 seconds to retry")
+            show_retry_message = True
+            show_ongoing_retries_message = False
+            try:
+                await manage_indexer_websocket(application_state, client_session, websocket_url)
+            except aiohttp.ServerConnectionError:
+                # Exit as we want to retry.
+                logger.error("Indexer websocket server connection timeout")
+                message_to_ignore = None # Allow repeated messages.
+            except aiohttp.ClientConnectorError:
+                # Exit as we want to retry.
+                show_retry_message = False
+                current_message = "Indexer websocket server connection could not be established"
+                if message_to_ignore != current_message:
+                    logger.error(current_message)
+                    message_to_ignore = current_message # Skip repeated messages.
+                    show_ongoing_retries_message = True
+            except aiohttp.ClientError:
+                # We retry these and log them as they are in theory unexpected and the user might
+                # shut down the indexer and restart it after fixing it.
+                logger.exception("Unexpected exception in indexer web socket management")
+                message_to_ignore = None # Allow repeated messages.
+            else:
+                message_to_ignore = None # Allow repeated messages.
+            finally:
+                application_state.indexer_is_connected = False
+
+            if show_ongoing_retries_message:
+                logger.debug("Not connected to indexer; retrying every 10 seconds")
+            elif show_retry_message:
+                logger.debug("Not connected to indexer; retrying in 10 seconds")
             await asyncio.sleep(10)
     finally:
         logger.debug("Exiting maintain_indexer_connection")
 
 
-async def manage_indexer_websocket(app_state: ApplicationState,
+async def manage_indexer_websocket(application_state: ApplicationState,
         client_session: aiohttp.ClientSession, websocket_url: str) -> None:
-    try:
-        async with client_session.ws_connect(websocket_url) as websocket:
-            logger.debug("Connected to indexer websocket")
-            app_state.indexer_is_connected = True
-            async for message in websocket:
-                if message.type == WSMsgType.ERROR:
-                    logger.error("Unhandled websocket message type %s", message.type,
-                        exc_info=message.data)
-                    break
-                elif message.type == WSMsgType.BINARY:
-                    message_bytes = cast(bytes, message.data)
-                    # NOTE At this time spent outputs are the only data format so there is no
-                    #     envelope format used to differentiate packet sizes yet.
-                    spent_output = OutputSpend(*output_spend_struct.unpack(message_bytes))
-                    logger.debug("Spent output notification from indexer of %r", spent_output)
-                    outpoint = Outpoint(spent_output.out_tx_hash, spent_output.out_index)
-                    logger.debug("Spent output notification outpoint=%r", outpoint)
-                    for websocket_state in app_state.get_account_websockets().values():
-                        logger.debug("Websocket account_id=%d, registrations=%r",
-                            websocket_state.account_id, websocket_state.spent_output_registrations)
-                        if outpoint in websocket_state.spent_output_registrations:
-                            logger.debug("Broadcasting spent output notification to account %d",
-                                websocket_state.account_id)
-                            app_state.account_message_queue.put_nowait(AccountMessage(
-                                websocket_state.account_id, AccountMessageKind.SPENT_OUTPUT_EVENT,
-                                message_bytes))
-                else:
-                    logger.error("Unhandled websocket message type %s", message.type)
-                    break
-            logger.debug("Websocket loop exit")
-    except aiohttp.ServerConnectionError:
-        # Exit as we want to retry.
-        logger.error("Indexer websocket server connection timeout")
-    except aiohttp.ClientConnectorError:
-        # Exit as we want to retry.
-        logger.error("Indexer websocket server connection could not be established")
-    except aiohttp.ClientError:
-        # We retry these and log them as they are in theory unexpected and the user might
-        # shut down the indexer and restart it after fixing it.
-        logger.exception("Unexpected exception in indexer web socket management")
-    finally:
-        app_state.indexer_is_connected = False
+    async with client_session.ws_connect(websocket_url) as websocket:
+        logger.debug("Connected to indexer websocket")
+        application_state.indexer_is_connected = True
+        async for message in websocket:
+            if message.type == WSMsgType.ERROR:
+                logger.error("Unhandled websocket message type %s", message.type,
+                    exc_info=message.data)
+                break
+            elif message.type == WSMsgType.BINARY:
+                message_bytes = cast(bytes, message.data)
+                # NOTE At this time spent outputs are the only data format so there is no
+                #     envelope format used to differentiate packet sizes yet.
+                spent_output = OutputSpend(*output_spend_struct.unpack(message_bytes))
+                logger.debug("Spent output notification from indexer of %r", spent_output)
+                outpoint = Outpoint(spent_output.out_tx_hash, spent_output.out_index)
+                logger.debug("Spent output notification outpoint=%r", outpoint)
+                for websocket_state in application_state.get_account_websockets().values():
+                    logger.debug("Websocket account_id=%d, registrations=%r",
+                        websocket_state.account_id, websocket_state.spent_output_registrations)
+                    if outpoint in websocket_state.spent_output_registrations:
+                        logger.debug("Broadcasting spent output notification to account %d",
+                            websocket_state.account_id)
+                        application_state.account_message_queue.put_nowait(AccountMessage(
+                            websocket_state.account_id, AccountMessageKind.SPENT_OUTPUT_EVENT,
+                            message_bytes))
+            else:
+                logger.error("Unhandled websocket message type %s", message.type)
+                break
+        logger.debug("Websocket loop exit")
