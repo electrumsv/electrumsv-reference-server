@@ -104,13 +104,14 @@ class TestAiohttpRESTAPI:
                 CHANNEL_BEARER_TOKEN_ID = single_channel_data['access_tokens'][0]['id']
                 return CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID
 
-    async def _create_read_only_token(self, CHANNEL_ID: str) -> tuple[str, str]:
+    async def _create_channel_read_token(self, CHANNEL_ID: str, *, can_read: bool=True,
+            can_write: bool=False) -> tuple[str, str]:
         URL = "http://"+ TEST_EXTERNAL_HOST +":"+ str(TEST_EXTERNAL_PORT) + \
             "/api/v1/channel/manage/{channelid}/api-token"
         request_body = {
-            "description": "websocket read only token",
-            "can_read": True,
-            "can_write": False
+            "description": "websocket additional token",
+            "can_read": can_read,
+            "can_write": can_write
         }
         url = URL.format(channelid=CHANNEL_ID)
         self.logger.debug("test_create_new_token_for_channel url: %s", url)
@@ -318,12 +319,12 @@ class TestAiohttpRESTAPI:
     async def test_get_token_details(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
 
         expected_response_body = {
             "id": CHANNEL_READ_ONLY_TOKEN_ID,
             "token": CHANNEL_READ_ONLY_TOKEN,
-            "description": "websocket read only token",
+            "description": "websocket additional token",
             "can_read": True,
             "can_write": False
         }
@@ -351,7 +352,7 @@ class TestAiohttpRESTAPI:
     async def test_get_list_of_tokens(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
 
         expected_response_body = [
             {
@@ -364,7 +365,7 @@ class TestAiohttpRESTAPI:
             {
                 "id": CHANNEL_READ_ONLY_TOKEN_ID,
                 "token": CHANNEL_READ_ONLY_TOKEN,
-                "description": "websocket read only token",
+                "description": "websocket additional token",
                 "can_read": True,
                 "can_write": False
             }
@@ -415,7 +416,7 @@ class TestAiohttpRESTAPI:
     async def test_write_message_read_only_token_should_fail(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
 
         headers = {}
         headers["Content-Type"] = "application/json"
@@ -490,7 +491,7 @@ class TestAiohttpRESTAPI:
     async def test_get_messages_head(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
         self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         # handler: get_messages
@@ -510,7 +511,7 @@ class TestAiohttpRESTAPI:
     async def test_get_messages_unread_should_get_one(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
         _response = self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         # handler: get_messages
@@ -540,7 +541,7 @@ class TestAiohttpRESTAPI:
     async def test_mark_message_read_or_unread(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
         _response = self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         # handler: mark_message_read_or_unread
@@ -571,9 +572,9 @@ class TestAiohttpRESTAPI:
     async def test_delete_message_with_read_only_token(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
         CHANNEL_READ_ONLY_TOKEN_ID2, CHANNEL_READ_ONLY_TOKEN2 = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
         _response = self._write_message(CHANNEL_ID, CHANNEL_BEARER_TOKEN)
 
         # handler: delete_message
@@ -720,7 +721,7 @@ class TestAiohttpRESTAPI:
             CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = \
                 await self._create_new_channel()
             CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-                await self._create_read_only_token(CHANNEL_ID)
+                await self._create_channel_read_token(CHANNEL_ID)
 
             EXPECTED_MSG_COUNT = 10
             logger.debug("CHANNEL_ID: %s", CHANNEL_ID)
@@ -785,13 +786,13 @@ class TestAiohttpRESTAPI:
         async def main() -> None:
             CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = \
                 await self._create_new_channel()
-            CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-                await self._create_read_only_token(CHANNEL_ID)
+            CHANNEL_RW_TOKEN_ID, CHANNEL_RW_TOKEN = \
+                await self._create_channel_read_token(CHANNEL_ID, can_write=True)
 
             EXPECTED_MSG_COUNT = 10
             logger.debug("CHANNEL_ID: %s", CHANNEL_ID)
             logger.debug("CHANNEL_BEARER_TOKEN: %s", CHANNEL_BEARER_TOKEN)
-            logger.debug("CHANNEL_READ_ONLY_TOKEN: %s", CHANNEL_READ_ONLY_TOKEN)
+            logger.debug("CHANNEL_RW_TOKEN: %s", CHANNEL_RW_TOKEN)
 
             completion_event = asyncio.Event()
             url = WS_URL_GENERAL
@@ -799,7 +800,7 @@ class TestAiohttpRESTAPI:
                 manage_general_websocket_connection(url, self._api_key, EXPECTED_MSG_COUNT,
                     completion_event))
             await asyncio.sleep(3)
-            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_BEARER_TOKEN,
+            task2 = asyncio.create_task(push_messages(CHANNEL_ID, CHANNEL_RW_TOKEN,
                 EXPECTED_MSG_COUNT))
             await asyncio.gather(task1, task2)
             await completion_event.wait()
@@ -810,7 +811,7 @@ class TestAiohttpRESTAPI:
     async def test_revoke_selected_token(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
 
         # handler: revoke_selected_token
         URL = 'http://{host}:{port}/api/v1/channel/manage/{channelid}/api-token/{tokenid}'\
@@ -847,7 +848,7 @@ class TestAiohttpRESTAPI:
     async def test_expired_token_should_fail(self) -> None:
         CHANNEL_ID, CHANNEL_BEARER_TOKEN, CHANNEL_BEARER_TOKEN_ID = await self._create_new_channel()
         CHANNEL_READ_ONLY_TOKEN_ID, CHANNEL_READ_ONLY_TOKEN = \
-            await self._create_read_only_token(CHANNEL_ID)
+            await self._create_channel_read_token(CHANNEL_ID)
         self._revoke_token(CHANNEL_ID, CHANNEL_READ_ONLY_TOKEN_ID)
 
         # handler: get_token_details
