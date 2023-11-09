@@ -184,10 +184,14 @@ async def _subscribe_to_general_notifications_peer_channels(url: str, api_token:
                         logger.info('New message: %s', content)
                         assert content['message_type'] == 'bsvapi.channels.notification'
                         assert isinstance(content['result'], dict)
-                        assert isinstance(content['result']['id'], str)
-                        channel_id_bytes = base64.urlsafe_b64decode(content['result']['id'])
+                        assert isinstance(content['result']['channel_id'], str)
+                        channel_id_bytes = base64.urlsafe_b64decode(content['result']['channel_id'])
                         assert len(channel_id_bytes) == 64
-                        assert content['result']['notification'] == 'New message arrived'
+                        assert content['result']['sequence'] == count + 1
+                        assert content['result']['content_type'] == "application/json"
+                        assert isinstance(content['result']['received'], str)
+                        assert len(content['result']['received']) > 1 and \
+                            content['result']['received'][-1] == "Z"
 
                         count += 1
                         if expected_count == count:

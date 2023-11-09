@@ -11,6 +11,7 @@ from .constants import AccountMessageKind, OutboundDataFlag
 
 if typing.TYPE_CHECKING:
     from .msg_box.models import MsgBox
+    from .msg_box.types import MessageRow
 
 
 # TODO Ideally these media types would be constants from some standard library.
@@ -34,7 +35,7 @@ class HeadersWSClient(NamedTuple):
 class MsgBoxWSClient(NamedTuple):
     ws_id: str
     websocket: web.WebSocketResponse
-    msg_box_internal_id: int
+    messagebox_id: int
 
 
 class Route(NamedTuple):
@@ -65,10 +66,11 @@ class Header(TypedDict):
     work: int
 
 
-class PushNotification(TypedDict):
-    msg_box: 'MsgBox'
-    notification: str
-
+class NotificationJsonData(TypedDict):
+    sequence: int
+    received: str
+    content_type: str
+    channel_id: str
 
 class HeaderSVTip(TypedDict):
     header: Header
@@ -77,14 +79,9 @@ class HeaderSVTip(TypedDict):
     height: int
 
 
-class ChannelNotification(TypedDict):
-    id: str
-    notification: str
-
-
 class GeneralNotification(TypedDict):
     message_type: str
-    result: Union[ChannelNotification, str]
+    result: Union[NotificationJsonData, str]
 
 
 class AccountMessage(NamedTuple):

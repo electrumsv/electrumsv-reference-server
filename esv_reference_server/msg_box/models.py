@@ -2,25 +2,21 @@
 Copyright(c) 2021 Bitcoin Association.
 Distributed under the Open BSV software license, see the accompanying file LICENSE
 """
-from dataclasses import dataclass
 from datetime import datetime
-from typing import NamedTuple, Optional, List
+from typing import NamedTuple
+
+from ..constants import MessageBoxTokenFlag
 
 
-@dataclass()
-class MsgBoxAPIToken:
+class MsgBoxAPITokenRow(NamedTuple):
     id: int
     account_id: int
     msg_box_id: int
     token: str  # 64 byte base64.urlsafe_b64decode
-    # fcm_tokens: List[FCMToken] - not implemented
     description: str
-    can_read: bool
-    can_write: bool
-    valid_from: datetime
-    valid_to: Optional[datetime]
-
-
+    flags: MessageBoxTokenFlag
+    validfrom: int  # time.time()
+    validto: int|None  # time.time()
 
 class MsgBox(NamedTuple):
     id: int
@@ -33,7 +29,7 @@ class MsgBox(NamedTuple):
     min_age_days: int
     max_age_days: int
     autoprune: bool
-    api_tokens: List[MsgBoxAPIToken]
+    api_tokens: list[MsgBoxAPITokenRow]
     head_message_sequence: int
 
 
@@ -48,18 +44,6 @@ class MsgBoxRow(NamedTuple):
     minagedays: int
     maxagedays: int
     autoprune: bool
-
-
-class MsgBoxAPITokenRow(NamedTuple):
-    # id: int - autoincrement id
-    account_id: int
-    msg_box_id: int
-    token: str  # 64 byte base64.urlsafe_b64decode
-    description: str
-    canread: bool
-    canwrite: bool
-    validfrom: int  # time.time()
-    validto: Optional[int]  # time.time()
 
 
 class Message(NamedTuple):
