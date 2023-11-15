@@ -81,7 +81,7 @@ async def indexer_post_tip_filter_matches(request: web.Request) -> web.Response:
             "Content-Type":     content_type,
         }
         if metadata.tip_filter_callback_token is not None:
-            headers["Authorization"] = metadata.tip_filter_callback_token
+            headers["Authorization"] = f"Bearer {metadata.tip_filter_callback_token}"
         try:
             async with session.post(url, headers=headers, data=json_text) as response:
                 if response.status == HTTPStatus.OK:
