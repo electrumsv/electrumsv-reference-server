@@ -239,7 +239,7 @@ paths:
         '200':
           description: Success
 
-  /api/v1/channel/manage/:
+  /api/v1/channel/manage:
     post:
       summary: Create a new Peer Channel
       security:
