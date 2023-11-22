@@ -1,6 +1,13 @@
 bitcoinx
 requests>=2.21.0
-aiohttp
+# Unit tests fail in with aiohttp 3.9!
+# Traceback (most recent call last):
+#   File "/home/vsts/work/1/s/esv_reference_server/application_state.py", line 299, in _header_notifications_task_async
+#     async with session.get(url_to_fetch, headers=request_headers) as resp:
+#   File "/opt/hostedtoolcache/Python/3.10.13/x64/lib/python3.10/site-packages/aiohttp/client.py", line 1206, in __aexit__
+#     await self._resp.wait_for_close()
+# TypeError: object Mock can't be used in 'await' expression
+aiohttp==3.8.4
 electrumsv-database>=1.6
 # electrumsv-node
 typing_extensions
