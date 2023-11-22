@@ -564,10 +564,9 @@ class MsgBoxSQLiteRepository:
             return seq if seq is not None else 0
         return read(self._database_context)
 
-    def get_messages(self, api_token_id: int, onlyunread: bool) -> tuple[list[MessageRow],
-            int | None]:
+    def get_messages(self, api_token_id: int, onlyunread: bool) -> tuple[list[MessageRow],int|None]:
         @replace_db_context_with_connection
-        def read(db: sqlite3.Connection) -> tuple[list[MessageRow], int | None]:
+        def read(db: sqlite3.Connection) -> tuple[list[MessageRow],int|None]:
             sql = """
                 SELECT msg_box.sequenced
                 FROM msg_box

@@ -387,10 +387,11 @@ paths:
                 $ref: "#/components/schemas/Message"
 
     head:
-      summary: Get max sequence number of channel
+      summary: Get the channel metadata
       description: |
-        Get max sequence number of channel. The max sequence number is returned in the response
-        header's 'ETag' key.
+        Reads channel metadata some of which is related to the access token used. The max sequence
+        number is returned in the 'ETag' response header. The channel access permissions for the
+        access token is returned in the 'Channel-Access' response header.
       security:
         - BearerAuth: [ ]
       tags:
@@ -402,7 +403,13 @@ paths:
             ETag:
               schema:
                 type: integer
-              description: Max Sequence.
+              description: |
+                The maximum sequence number. This is the number of the last received message in
+                the channel.
+            Channel-Access:
+              schema:
+                type: string
+              description: Either 'r' indicating read access or 'rw' indicating read/write access.
 
     get:
       parameters:

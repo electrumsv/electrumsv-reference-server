@@ -493,36 +493,26 @@ async def get_messages(request: web.Request) -> web.Response:
     if msg_box_api_token is None:
         raise web.HTTPBadRequest(reason="No 'Bearer' authentication.")
 
-    _auth_for_channel_token(request, 'get_messages', msg_box_api_token, external_id,
-        msg_box_repository)
+    msgbox_id, token_row = _auth_for_channel_token(request, 'get_messages', msg_box_api_token,
+        external_id, msg_box_repository)
 
     if request.method == 'HEAD':
-        logger.debug("Head called for msg_box: %s", external_id)
-
         max_sequence1 = msg_box_repository.get_max_sequence(msg_box_api_token, external_id)
-        # NOTE(rt12) `None` is never returned..
-        # if max_sequence is None:
-        #     raise web.HTTPNotFound()
+        permissions_text = "r" if token_row.flags & MessageBoxTokenFlag.READ_ACCESS else ""
+        permissions_text += "w" if token_row.flags & MessageBoxTokenFlag.WRITE_ACCESS else ""
 
-        logger.debug("Head max sequence of msg_box: %s is %s", external_id, max_sequence1)
+        logger.debug("Head of msg_box %s: max sequence=%d", external_id, max_sequence1)
         response_headers = {
             'User-Agent': 'ElectrumSV-server',
-            'Access-Control-Expose-Headers': 'authorization,etag',
+            'Access-Control-Expose-Headers': 'authorization,etag,channel-flags',
             'ETag': str(max_sequence1),
+            "Channel-Flags": permissions_text,
         }
         return web.Response(headers=response_headers)
 
     assert request.method == 'GET'
-
-    msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
-    if not msg_box_api_token:
-        raise web.HTTPNotFound(reason=f"{APIErrors.PEER_CHANNEL_TOKEN_NOT_FOUND}: "
-                                      "Peer channel token not found.")
-
-    assert msg_box_api_token_obj is not None
     logger.info("Get messages for channel_id: %s", external_id)
-    message_rows_and_sequence = msg_box_repository.get_messages(msg_box_api_token_obj.id,
-        onlyunread)
+    message_rows_and_sequence = msg_box_repository.get_messages(token_row.id, onlyunread)
     if message_rows_and_sequence is None:
         raise web.HTTPNotFound(
             reason=f"{APIErrors.MESSAGES_NOT_FOUND}: Messages not found or not sequenced.")
