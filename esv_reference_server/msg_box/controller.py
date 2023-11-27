@@ -314,50 +314,39 @@ async def get_list_of_tokens(request: web.Request) -> web.Response:
 
 async def create_new_token_for_channel(request: web.Request) -> web.Response:
     app_state: ApplicationState = request.app['app_state']
-    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
 
     api_key = _try_read_bearer_token(request)
-    if not api_key:
-        raise web.HTTPBadRequest(reason="No 'Bearer' authentication.")
+    if not api_key: raise web.HTTPBadRequest(reason="No 'Bearer' authentication.")
 
     account_id, _account_flags = sqlite_db.get_account_id_for_api_key(
         app_state.database_context, api_key)
-    if account_id is None:
-        raise web.HTTPUnauthorized
+    if account_id is None: raise web.HTTPUnauthorized()
 
-    external_id = request.match_info['channelid']
+    r: MsgBoxSQLiteRepository = app_state.msg_box_repository
+    msg_box = r.get_msg_box(account_id, request.match_info['channelid'])
+    if msg_box is None: raise web.HTTPNotFound()
 
-    msg_box = msg_box_repository.get_msg_box(account_id, external_id)
-    if msg_box is None:
-        raise web.HTTPNotFound
-
-    flags = MessageBoxTokenFlag.NONE
     try:
         body = await request.json()
     except JSONDecodeError:
         logger.exception("failed getting json from request")
-        raise web.HTTPBadRequest(reason="bad request body, invalid JSON")
+        raise web.HTTPBadRequest(reason="Body is invalid JSON")
 
     if type(body) is not dict:
-        raise web.HTTPBadRequest(reason="bad request body, not a JSON object")
+        raise web.HTTPBadRequest(reason="Body is not a JSON object")
     for key_name in ("description", "can_read", "can_write"):
         if key_name not in body:
-            raise web.HTTPBadRequest(reason=f"bad request body, invalid '{key_name}' field")
+            raise web.HTTPBadRequest(reason=f"Missing property '{key_name}' in JSON body")
 
     description = body["description"]
     if type(description) is not str:
         raise web.HTTPBadRequest(reason="bad request body, invalid description")
-    if bool(body["can_read"]):
-        flags |= MessageBoxTokenFlag.READ_ACCESS
-    if bool(body["can_write"]):
-        flags |= MessageBoxTokenFlag.WRITE_ACCESS
-
-    api_token_view_model_get = msg_box_repository.create_api_token(description, flags,
-        msg_box.id, account_id)
-    if api_token_view_model_get is None:
-        raise web.HTTPNotFound()
-
-    return web.json_response(asdict(api_token_view_model_get))
+    flags = MessageBoxTokenFlag.NONE
+    if bool(body["can_read"]):  flags |= MessageBoxTokenFlag.READ_ACCESS
+    if bool(body["can_write"]): flags |= MessageBoxTokenFlag.WRITE_ACCESS
+    view_model = r.create_api_token(description, flags, msg_box.id, account_id)
+    if view_model is None: raise web.HTTPNotFound()
+    return web.json_response(asdict(view_model))
 
 
 # ----- MESSAGE MANAGEMENT APIs ----- #
@@ -518,7 +507,8 @@ async def get_messages(request: web.Request) -> web.Response:
             reason=f"{APIErrors.MESSAGES_NOT_FOUND}: Messages not found or not sequenced.")
 
     message_rows, max_sequence2 = message_rows_and_sequence
-    logger.info("Returning %d messages for channel: %s", len(message_rows), external_id)
+    logger.info("Returning %d messages for channel: %s (%s)", len(message_rows), external_id,
+        max_sequence2)
 
     response_headers = {
         'User-Agent': 'ElectrumSV-server',
@@ -541,9 +531,6 @@ async def get_messages(request: web.Request) -> web.Response:
 
 
 async def mark_message_read_or_unread(request: web.Request) -> web.Response:
-    app_state: ApplicationState = request.app['app_state']
-    msg_box_repository: MsgBoxSQLiteRepository = app_state.msg_box_repository
-
     external_id = request.match_info.get('channelid')
     if not external_id:
         raise web.HTTPNotFound(reason=f"{APIErrors.MISSING_PATH_PARAMETER}: "
@@ -558,33 +545,27 @@ async def mark_message_read_or_unread(request: web.Request) -> web.Response:
 
     # Note this bearer token is the channel-specific one
     msg_box_api_token = _try_read_bearer_token(request)
-    if not msg_box_api_token:
-        raise web.HTTPBadRequest(reason="No 'Bearer' authentication.")
+    if not msg_box_api_token: raise web.HTTPBadRequest(reason="No 'Bearer' authentication.")
 
-    try:
-        _auth_for_channel_token(request,
-            'mark_message_read_or_unread', msg_box_api_token, external_id, msg_box_repository)
-    except web.HTTPException as e:
-        raise e
+    app_state: ApplicationState = request.app['app_state']
+    r: MsgBoxSQLiteRepository = app_state.msg_box_repository
+    _auth_for_channel_token(request, 'mark_message_read_or_unread', msg_box_api_token, external_id,
+        r)
 
     try:
         body = await request.json()
     except JSONDecodeError:
         logger.exception("bad request body, invalid JSON")
         raise web.HTTPBadRequest(reason="bad request body, invalid JSON")
-
     set_read_to = cast(bool, body['read'])
-
     logger.info("Flagging message sequence %s from msg_box %s (older=%s, read=%s)",
         sequence, external_id, older, set_read_to)
-    msg_box_api_token_obj = msg_box_repository.get_api_token(msg_box_api_token)
+    msg_box_api_token_obj = r.get_api_token(msg_box_api_token)
     assert msg_box_api_token_obj is not None
-    if not msg_box_repository.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
+    if not r.sequence_exists(msg_box_api_token_obj.id, int(sequence)):
         raise web.HTTPNotFound(reason=f"{APIErrors.SEQUENCE_NUMBER_NOT_FOUND}: "
                                       "Sequence number not found.")
-
-    msg_box_repository.mark_messages(
-        external_id, msg_box_api_token_obj.id, int(sequence), older, set_read_to)
+    r.mark_messages(external_id, msg_box_api_token_obj.id, int(sequence), older, set_read_to)
     raise web.HTTPOk()
 
 

@@ -42,14 +42,14 @@ class MsgBoxSQLiteRepository:
         self.logger = logging.getLogger("msg-box-sqlite-db")
         self._database_context = database_context
 
-    def create_tables(self, db: Optional[sqlite3.Connection]=None) -> None:
+    def create_tables(self, db: sqlite3.Connection|None=None) -> None:
         assert db is not None and isinstance(db, sqlite3.Connection)
         self.create_message_box_table(db)
         self.create_messages_table(db)
         self.create_message_box_api_tokens_table(db)
         self.create_message_status_table(db)
 
-    def drop_tables(self, db: Optional[sqlite3.Connection]=None) -> None:
+    def drop_tables(self, db: sqlite3.Connection|None=None) -> None:
         assert db is not None and isinstance(db, sqlite3.Connection)
         db.execute("DROP TABLE IF EXISTS message_status")
         db.execute("DROP TABLE IF EXISTS msg_box_api_token")
@@ -139,7 +139,7 @@ class MsgBoxSQLiteRepository:
 
     def update_msg_box(self, msg_box_view_amend: MsgBoxViewModelAmend,
             external_id: str) -> Optional[view_models.MsgBoxViewModelAmend]:
-        def write(db: Optional[sqlite3.Connection]=None) -> int:
+        def write(db: sqlite3.Connection|None=None) -> int:
             assert db is not None and isinstance(db, sqlite3.Connection)
             sql = """
                 UPDATE msg_box
@@ -320,7 +320,7 @@ class MsgBoxSQLiteRepository:
         return read(self._database_context)
 
     def delete_msg_box(self, external_id: str) -> bool:
-        def write(db: Optional[sqlite3.Connection]=None) -> bool:
+        def write(db: sqlite3.Connection|None=None) -> bool:
             assert db is not None and isinstance(db, sqlite3.Connection)
             selectChannelByExternalId = "SELECT id FROM msg_box WHERE externalid = @msg_box_id;"
             result = db.execute(selectChannelByExternalId, (external_id,)).fetchone()
@@ -346,25 +346,32 @@ class MsgBoxSQLiteRepository:
         return self._database_context.run_in_thread(write)
 
     def create_api_token(self, description: str, flags: MessageBoxTokenFlag,
-            msg_box_id: int, account_id: int) -> APITokenViewModelGet|None:
+            msgbox_id: int, account_id: int) -> APITokenViewModelGet:
         token = utils.create_channel_api_token()
-        def write(db: sqlite3.Connection|None=None) -> tuple[int, str, str, int]|None:
+        def write(db: sqlite3.Connection|None=None) -> int:
             assert db is not None and isinstance(db, sqlite3.Connection)
             sql = """
                 INSERT INTO msg_box_api_token
                     (account_id, msg_box_id, token, description, flags, validfrom)
-                VALUES(@account_id, @msg_box_id, @token, @description, @flags, @validfrom)
-                RETURNING id, token, description, flags;
+                VALUES (?1,?2,?3,?4,?5,?6)
+                RETURNING id
             """
-            params = (account_id, msg_box_id, token, description, flags, int(time.time()))
-            return cast(tuple[int, str, str, int]|None, db.execute(sql, params).fetchone())
-        row = self._database_context.run_in_thread(write)
-        if row is not None:
-            id, token, description, flags_int = row
-            return APITokenViewModelGet(id=id, token=token, description=description,
-                can_read=flags_int & MessageBoxTokenFlag.READ_ACCESS != 0,
-                can_write=flags_int & MessageBoxTokenFlag.WRITE_ACCESS != 0)
-        return None
+            params = (account_id, msgbox_id, token, description, flags, int(time.time()))
+            token_id, = cast(tuple[int], db.execute(sql, params).fetchone())
+            sql = """
+                INSERT INTO message_status (message_id,token_id,isread,isdeleted)
+                SELECT M.id,?1,FALSE,FALSE
+                FROM message M
+                WHERE M.msg_box_id=?2
+            """
+            cursor = db.execute(sql, (token_id, msgbox_id))
+            self.logger.debug("Inserted token with %d existing messages", cursor.rowcount)
+            return token_id
+
+        id = self._database_context.run_in_thread(write)
+        return APITokenViewModelGet(id=id, token=token, description=description,
+            can_read=flags & MessageBoxTokenFlag.READ_ACCESS != 0,
+            can_write=flags & MessageBoxTokenFlag.WRITE_ACCESS != 0)
 
     def get_api_token_by_id(self, token_id: int) -> APITokenViewModelGet|None:
         sql = "SELECT id, token, description, flags FROM msg_box_api_token " \
@@ -426,11 +433,11 @@ class MsgBoxSQLiteRepository:
         return read(self._database_context)
 
     def delete_api_token(self, token_id: int) -> None:
-        sql = """UPDATE msg_box_api_token SET validto = @validto WHERE id = @tokenId;"""
-        params = (int(time.time()), token_id)
-        def write(db: Optional[sqlite3.Connection]=None) -> None:
+        deletion_time = int(time.time())
+        params = (deletion_time, token_id)
+        def write(db: sqlite3.Connection|None=None) -> None:
             assert db is not None and isinstance(db, sqlite3.Connection)
-            db.execute(sql, params)
+            db.execute("UPDATE msg_box_api_token SET validto=?1 WHERE id=?2", params)
         self._database_context.run_in_thread(write)
 
     def get_api_token_authorization_data_for_msg_box(self, externalid: str, token_id: int) \
@@ -455,7 +462,7 @@ class MsgBoxSQLiteRepository:
 
     def write_message(self, message: Message) -> MessageRow:
         """Returns an error code and error reason"""
-        def write(db: Optional[sqlite3.Connection]=None) -> MessageRow:
+        def write(db: sqlite3.Connection|None=None) -> MessageRow:
             assert db is not None and isinstance(db, sqlite3.Connection)
             # Translating this query from postgres -> SQLite
             # The "FOR UPDATE" lock can be dropped because SQLite does broad-brush/global db locking
@@ -501,15 +508,11 @@ class MsgBoxSQLiteRepository:
                 message_row.sequence, message_row.message_box_id)
 
             sql = """
-                INSERT INTO message_status
-                    (message_id, token_id, isread, isdeleted)
+                INSERT INTO message_status (message_id, token_id, isread, isdeleted)
                 SELECT @messageid, msg_box_api_token.id,
-                       CASE
-                            WHEN msg_box_api_token.id = @fromtoken
-                            THEN TRUE
-                            ELSE FALSE
-                        END AS isread,
-                        FALSE AS isdeleted
+                    CASE WHEN msg_box_api_token.id = @fromtoken
+                        THEN TRUE ELSE FALSE END AS isread,
+                    FALSE AS isdeleted
                 FROM msg_box_api_token
                 WHERE validto IS NULL AND msg_box_id = @msg_box_id
             """
@@ -577,8 +580,7 @@ class MsgBoxSQLiteRepository:
             if len(rows) == 0:
                 return [], None
 
-            sequenced = rows[0][0]
-            if sequenced:
+            if rows[0][0]:
                 sql = """
                     SELECT MAX(message.seq) AS max_sequence
                     FROM message
@@ -636,7 +638,7 @@ class MsgBoxSQLiteRepository:
             )
             AND message_status.token_id = @token_id
         """
-        def write(db: Optional[sqlite3.Connection]=None) -> None:
+        def write(db: sqlite3.Connection|None=None) -> None:
             assert db is not None and isinstance(db, sqlite3.Connection)
             params = (set_read_to, external_id, sequence, mark_older, token_id)
             db.execute(sql, params)
@@ -673,7 +675,7 @@ class MsgBoxSQLiteRepository:
         sql = "UPDATE message_status SET isdeleted = true " \
               "WHERE token_id = @token_id AND message_id = @message_id " \
               "RETURNING id;"
-        def write(db: Optional[sqlite3.Connection]=None) -> int:
+        def write(db: sqlite3.Connection|None=None) -> int:
             assert db is not None and isinstance(db, sqlite3.Connection)
             rows = db.execute(sql, (token_id, message_id,)).fetchall()
             return len(rows)
